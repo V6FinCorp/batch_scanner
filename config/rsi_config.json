@@ -1,0 +1,17 @@
+{
+    "symbols": [
+        "ADANIENT"
+    ],
+    "days_fallback_threshold": 200,
+    "rsi_periods": [
+        5,
+        15,
+        30,
+        60
+    ],
+    "rsi_overbought": 70,
+    "rsi_oversold": 30,
+    "base_timeframe": "30mins",
+    "default_timeframe": "30mins",
+    "days_to_list": 4
+}

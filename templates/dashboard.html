@@ -1,0 +1,3721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Scanners Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="simple-theme.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div class="header-left">
+                <h1 class="header-title"><i class="fas fa-chart-line"></i> Trading Scanners</h1>
+                <div id="headerSummaryInfo" class="header-center" style="display: none;">
+                    <div class="header-symbol-info">
+                        <span id="headerSymbolName">--</span>
+                        <span class="symbol-price" id="headerSymbolPrice">0.00</span>
+                    </div>
+                    <div class="last-updated">
+                        <i class="fas fa-clock"></i> <span id="headerLastUpdated">Last Updated: --</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <!-- Global TimeFrame Selector (applies to RSI & EMA) -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="color: var(--text-secondary); font-size: 0.85rem; white-space: nowrap;">TimeFrame:</label>
+                        <select id="globalTimeframe" class="form-select" style="min-width: 140px; padding: 0.25rem 0.5rem; font-size: 0.85rem;">
+                            <option value="5mins">5mins</option>
+                            <option value="15mins" selected>15mins</option>
+                            <option value="30mins">30mins</option>
+                            <option value="1hour">60mins</option>
+                            <option value="daily">daily</option>
+                            <option value="weekly">weekly</option>
+                            <option value="monthly">Monthly</option>
+                        </select>
+                    </div>
+                    <button id="runAllAnalysisBtn" onclick="runAllAnalysisManually()" class="btn btn-primary" style="padding: 0.5rem 0.75rem; font-size: 0.85rem;">
+                        <i class="fas fa-rocket"></i> Run Full Analysis
+                    </button>
+                    <div class="text-muted">
+                        <i class="fas fa-calendar"></i> <span style="font-size: 0.8rem;" id="currentDateTime">Sep 7, 2025 12:00:00 PM</span>
+                    </div>
+                </div>
+                <!-- Dark Mode Toggle -->
+                <button id="darkModeToggle" class="theme-toggle" title="Toggle Theme">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Sidebar Toggle Button removed -->
+    
+    <div class="container">
+        <div class="dashboard-layout">
+            <!-- Sidebar (hidden) -->
+            <div id="sidebar" class="sidebar" style="display: none;">
+                <div class="sidebar-content">
+                    <div class="sidebar-header">
+                        <h2 class="sidebar-title">
+                            <i class="fas fa-cog"></i> Scanner & Parameters
+                        </h2>
+                    </div>
+                    
+                    <div class="sidebar-form">
+                        <div class="form-grid">
+                            <!-- Scanner Type -->
+                            <div class="form-group">
+                                <label class="form-label">Scanner</label>
+                                <select id="scannerType" class="form-select">
+                                    <option value="rsi">RSI</option>
+                                    <option value="ema">EMA</option>
+                                    <option value="dma">DMA</option>
+                                </select>
+                            </div>
+
+                            <!-- Base Timeframe -->
+                            <div class="form-group">
+                                <label class="form-label">Timeframe</label>
+                                <select id="baseTimeframe" class="form-select">
+                                    <option value="5mins">5min</option>
+                                    <option value="15mins">15min</option>
+                                    <option value="30mins">30min</option>
+                                    <option value="1hour">1H</option>
+                                    <option value="daily">Daily</option>
+                                </select>
+                            </div>
+
+                            <!-- Days to List -->
+                            <div class="form-group">
+                                <label class="form-label">Days</label>
+                                <input type="number" id="daysToList" value="" min="1" max="30" class="form-input">
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Parameters based on Scanner Type -->
+                        <div id="dynamicParams">
+                            <!-- RSI Parameters -->
+                            <div id="rsiParams">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">RSI Periods</label>
+                                        <input type="text" id="rsiPeriods" value="" placeholder="" class="form-input">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Max Days</label>
+                                        <input type="number" id="rsiDaysFallback" value="" min="10" max="500" class="form-input">
+                                    </div>
+                                </div>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">Overbought Level</label>
+                                        <input type="number" id="rsiOverbought" value="" min="50" max="90" step="1" class="form-input">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Oversold Level</label>
+                                        <input type="number" id="rsiOversold" value="" min="10" max="50" step="1" class="form-input">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- EMA Parameters -->
+                            <div id="emaParams" class="hidden">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">EMA Periods</label>
+                                        <input type="text" id="emaPeriods" value="" placeholder="" class="form-input">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Max Days</label>
+                                        <input type="number" id="emaDaysFallback" value="" min="10" max="500" class="form-input">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- DMA Parameters -->
+                            <div id="dmaParams" class="hidden">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">DMA Periods</label>
+                                        <input type="text" id="dmaPeriods" value="" placeholder="" class="form-input">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Max Days</label>
+                                        <input type="number" id="dmaDaysFallback" value="" min="10" max="500" class="form-input">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Universal Run Button -->
+                        <div class="sidebar-actions">
+                            <button onclick="runAllAnalysisManually()" id="runButton" class="btn btn-primary btn-block">
+                                <i class="fas fa-rocket"></i> Run Full Analysis
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div id="mainContent" class="main-content expanded">
+                <!-- Current Analysis Section -->
+                <div id="analysisSection" class="analysis-panel">
+                    <div class="analysis-header">
+                        <h2 class="analysis-title">
+                            <i class="fas fa-chart-pie"></i> Current Analysis & Trading Signals
+                        </h2>
+                    </div>
+                    
+                    <div class="analysis-content">
+                        <div id="analysisMessage" class="text-center text-muted" style="padding: 2rem;">
+                            No current analysis available. Please run a scanner first to see trading signals.
+                        </div>
+                        <div id="analysisDisplay" class="hidden">
+                            <!-- Current analysis will be dynamically generated here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section with Tabs (hidden) -->
+                <div id="resultsSection" class="panel hidden" style="display: none;">
+                    <div class="panel-header">
+                        <h2 class="panel-title">
+                            <i class="fas fa-chart-area"></i> Scanner Results
+                        </h2>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button onclick="exportResults()" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-save"></i> CSV
+                            </button>
+                            <button onclick="clearAllResults()" class="btn btn-secondary btn-sm">
+                                <i class="fas fa-trash"></i> Clear All
+                            </button>
+                        </div>
+                    </div>            <div class="panel-content">
+
+            <!-- Scanner Tabs -->
+            <div class="tabs mb-3">
+                <nav class="tab-nav">
+                    <button id="rsiScannerTab" onclick="switchScannerTab('rsi')" class="tab-button active">
+                        <i class="fas fa-water"></i> RSI
+                    </button>
+                    <button id="emaScannerTab" onclick="switchScannerTab('ema')" class="tab-button">
+                        <i class="fas fa-chart-line"></i> EMA
+                    </button>
+                    <button id="dmaScannerTab" onclick="switchScannerTab('dma')" class="tab-button">
+                        <i class="fas fa-chart-bar"></i> DMA
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Content Tabs (Summary/Table/Chart/Results) -->
+                    <div class="tabs mb-3">
+                <nav class="tab-nav">
+                        <button id="tableTab" onclick="switchContentTab('table')" class="tab-button active">
+                        <i class="fas fa-table"></i> Table
+                    </button>
+                        <button id="chartTab" onclick="switchContentTab('chart')" class="tab-button">
+                        <i class="fas fa-chart-line"></i> Price Chart
+                    </button>
+                    <button id="resultsTab" onclick="switchContentTab('results')" class="tab-button">
+                        <i class="fas fa-chart-bar"></i> Results
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" class="hidden text-center mb-4">
+                <div class="loading" style="display: inline-block; margin-right: 0.5rem;"></div>
+                <span>Running scanner...</span>
+            </div>
+
+            <!-- Results Tab Content -->
+            <div id="resultsTabContent">
+                <div id="resultsDisplay">
+                    <pre id="resultsOutput" style="background-color: var(--bg-primary); padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 0.8rem; min-height: 200px;"></pre>
+                </div>
+            </div>
+
+            <!-- Table Tab Content -->
+            <div id="tableTabContent">
+                <div class="mb-3" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 class="panel-title">Detail View</h3>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label class="form-label">Rows to show:</label>
+                        <select id="tableRowsSelect" onchange="updateTableDisplay()" class="form-select">
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="all">All</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="tableContainer" class="table-container">
+                    <table id="resultsTable" class="table">
+                        <thead>
+                            <tr id="tableHeaderRow">
+                                <th id="timeHeader" class="sortable">
+                                    Time <span id="timeSortIcon">↓</span>
+                                </th>
+                                <th class="non-sortable">
+                                    Symbol <span></span>
+                                </th>
+                                <th class="non-sortable">
+                                    CMP <span></span>
+                                </th>
+                                <!-- Dynamic indicator headers will be inserted here -->
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                            <!-- Table rows will be dynamically generated -->
+                        </tbody>
+                    </table>
+                    <div id="tableMessage" class="text-center text-muted" style="padding: 2rem;">
+                        No data available. Please run a scanner first.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart Tab Content -->
+            <div id="chartTabContent" class="hidden">
+                <div class="mb-3" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 class="panel-title">Price Chart</h3>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label class="form-label">Chart Type:</label>
+                        <select id="chartTypeSelect" onchange="changeChartType()" class="form-select">
+                            <option value="line">Line Chart</option>
+                            <option value="candlestick">Candlestick (Colored Points)</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="chartContainer">
+                    <div class="chart-container">
+                        <canvas id="priceChart" width="400" height="250"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Status Messages -->
+            <div id="statusMessage" class="hidden">
+            <div id="statusMessageInner" class="alert alert-info">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span><i class="fas fa-info-circle"></i></span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 0.9rem; font-weight: 600;">Status</h3>
+                        <p id="statusText" style="margin: 0;"></p>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentScanner = 'rsi';
+        let scannerResults = {
+            rsi: null,
+            ema: null,
+            dma: null
+        };
+        let scannerOutputs = {
+            rsi: '',
+            ema: '',
+            dma: ''
+        };
+        let scannerChartData = {
+            rsi: null,
+            ema: null,
+            dma: null
+        };
+        let chart = null;
+        let isDarkMode = false;
+        let availableSymbols = [];
+        let currentChartType = 'line'; // Default chart type
+        let currentSortColumn = 'Time';
+        let currentSortDirection = 'desc'; // Default to descending for time
+        let isSidebarCollapsed = false; // Track sidebar state
+    // Toggle for EMA/DMA display: true shows % diff vs CMP, false shows raw values
+    let showPctDiff = true;
+        
+        // Runtime config cache - stores last used values for each scanner type
+        let runtimeConfig = {
+            'rsi': {},
+            'ema': {},  
+            'dma': {}
+        };
+        
+        // Flag to track if we should use runtime config or base config
+        let useRuntimeConfig = false;
+
+        // Sidebar toggle functionality
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('mainContent');
+            const toggleButton = document.getElementById('sidebarToggle');
+            const toggleIcon = toggleButton ? toggleButton.querySelector('i') : null;
+
+            isSidebarCollapsed = !isSidebarCollapsed;
+
+            if (isSidebarCollapsed) {
+                sidebar.classList.add('collapsed');
+                mainContent.classList.add('expanded');
+                if (toggleButton) toggleButton.classList.add('active');
+                if (toggleIcon) {
+                    toggleIcon.classList.remove('fa-times');
+                    toggleIcon.classList.add('fa-bars');
+                }
+            } else {
+                sidebar.classList.remove('collapsed');
+                mainContent.classList.remove('expanded');
+                if (toggleButton) toggleButton.classList.remove('active');
+                if (toggleIcon) {
+                    toggleIcon.classList.remove('fa-bars');
+                    toggleIcon.classList.add('fa-times');
+                }
+            }
+        }
+        
+        // Update header summary information
+    function updateHeaderSummary(analyses) {
+            const headerSummaryInfo = document.getElementById('headerSummaryInfo');
+            const headerSymbolName = document.getElementById('headerSymbolName');
+            const headerSymbolPrice = document.getElementById('headerSymbolPrice');
+            const headerLastUpdated = document.getElementById('headerLastUpdated');
+            
+            if (analyses && Object.keys(analyses).length > 0) {
+                const mainAnalysis = analyses.rsi || analyses.ema || analyses.dma;
+                if (mainAnalysis) {
+                    const symbol = mainAnalysis['Symbol'] || '--';
+                    const priceRaw = mainAnalysis['CMP'] ?? mainAnalysis['close'] ?? mainAnalysis['Close'] ?? 0;
+                    const price = (isNaN(parseFloat(priceRaw)) ? 0 : parseFloat(priceRaw)).toFixed(2);
+                    const time = mainAnalysis['Time'] || '--';
+                    
+                    headerSymbolName.textContent = symbol;
+                    headerSymbolPrice.textContent = `₹${price}`;
+                    headerLastUpdated.textContent = `Last Updated: ${time}`;
+                    
+                    headerSummaryInfo.style.display = 'flex';
+                }
+            } else {
+                headerSummaryInfo.style.display = 'none';
+            }
+        }
+
+        // Initialize
+            document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing dashboard...');
+            console.log('Chart.js available:', typeof Chart !== 'undefined');
+            console.log('Financial chart available:', typeof Chart && Chart.controllers && Chart.controllers.candlestick);
+            
+            setupEventListeners();
+            showScannerParams('rsi');
+            loadDarkModePreference();
+            
+            // Load config and auto-run scanner with defaults
+            initializeDashboard();
+            
+            // Initialize chart type selector
+            document.getElementById('chartTypeSelect').value = 'line';
+            
+            // Initialize scanner section as expanded
+            const scannerContent = document.getElementById('scannerContent');
+            // Content is visible by default
+
+            // Start updating date/time
+            updateDateTime();
+            setInterval(updateDateTime, 1000); // Update every second
+        });
+
+        // Setup event listeners
+        function setupEventListeners() {
+            document.getElementById('scannerType').addEventListener('change', function(e) {
+                currentScanner = e.target.value;
+                showScannerParams(currentScanner);
+                loadConfigForScanner(currentScanner);
+            });
+
+            // Dark mode toggle
+            document.getElementById('darkModeToggle').addEventListener('click', toggleDarkMode);
+        }
+
+        // Initialize dashboard with config loading and auto-run
+        async function initializeDashboard() {
+            console.log('Initializing dashboard with config defaults...');
+            
+            try {
+                // Load symbols first
+                await loadSymbolsFromConfig();
+                
+                // Load all indicator defaults
+                await loadIndicatorDefaults();
+                
+                // Longer delay to ensure form is fully populated
+                setTimeout(async () => {
+                    console.log('Auto-running all scanners with config defaults...');
+                    
+                    // Run all three scanners sequentially with delays
+                    const scanners = ['rsi', 'ema', 'dma'];
+                    const originalScanner = currentScanner;
+                    
+                    for (let i = 0; i < scanners.length; i++) {
+                        const scanner = scanners[i];
+                        console.log(`Auto-running ${scanner.toUpperCase()} scanner...`);
+                        
+                        // Switch to scanner and load its config
+                        currentScanner = scanner;
+                        showScannerParams(scanner);
+                        await loadConfigForScanner(scanner);
+                        
+                        // Run the scanner
+                        await runScanner();
+                        
+                        // Add delay between scanners (except for the last one)
+                        if (i < scanners.length - 1) {
+                            console.log('Waiting 3 seconds before next scanner...');
+                            await new Promise(resolve => setTimeout(resolve, 3000));
+                        }
+                    }
+                    
+                    // Reset to RSI scanner as default view
+                    currentScanner = 'rsi';
+                    showScannerParams('rsi');
+                    displayScannerResults('rsi');
+                    
+                    console.log('All scanners auto-run completed!');
+                    
+                }, 2000);
+                
+            } catch (error) {
+                console.error('Error initializing dashboard:', error);
+            }
+        }
+
+        // Load symbols from config file (store list only; UI symbol selector was removed)
+        async function loadSymbolsFromConfig() {
+            console.log('Loading symbols from config...');
+            try {
+                const response = await fetch('/api/config/symbols');
+                console.log('Symbols config response status:', response.status);
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Symbols config data:', data);
+                    availableSymbols = data.symbols || [];
+                } else {
+                    console.warn('Could not load symbols from config, status:', response.status);
+                    availableSymbols = ['RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'ITC'];
+                }
+            } catch (error) {
+                console.error('Error loading symbols from config:', error);
+                availableSymbols = ['RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'ITC'];
+            }
+        }
+
+        // Legacy helper (no-op if old element is not present)
+        function populateSymbolDropdown() {
+            const symbolSelect = document.getElementById('symbols');
+            if (!symbolSelect) return;
+            symbolSelect.innerHTML = '<option value="">Select Symbol...</option>';
+            availableSymbols.forEach(symbol => {
+                const option = document.createElement('option');
+                option.value = symbol;
+                option.textContent = symbol;
+                symbolSelect.appendChild(option);
+            });
+        }
+
+        // Show scanner-specific parameters
+        function showScannerParams(scannerType) {
+            // Hide all parameter sections
+            document.getElementById('rsiParams').classList.add('hidden');
+            document.getElementById('emaParams').classList.add('hidden');
+            document.getElementById('dmaParams').classList.add('hidden');
+
+            // Show selected scanner parameters
+            document.getElementById(scannerType + 'Params').classList.remove('hidden');
+        }
+
+        // Load indicator defaults from config files
+        async function loadIndicatorDefaults() {
+            console.log('Loading indicator defaults from config files...');
+            
+            // Load RSI defaults
+            try {
+                console.log('Fetching RSI config...');
+                const rsiResponse = await fetch('/api/config/rsi');
+                console.log('RSI config response status:', rsiResponse.status);
+                if (rsiResponse.ok) {
+                    const rsiConfig = await rsiResponse.json();
+                    console.log('RSI config data:', rsiConfig);
+                    
+                    document.getElementById('rsiPeriods').value = (rsiConfig.rsi_periods || []).join(',');
+                    document.getElementById('rsiDaysFallback').value = rsiConfig.days_fallback_threshold || '';
+                    document.getElementById('rsiOverbought').value = rsiConfig.rsi_overbought || 70;
+                    document.getElementById('rsiOversold').value = rsiConfig.rsi_oversold || 30;
+                    
+                    // Set base timeframe and days from RSI config
+                    if (rsiConfig.base_timeframe) {
+                        document.getElementById('baseTimeframe').value = rsiConfig.base_timeframe;
+                        console.log('Set timeframe to:', rsiConfig.base_timeframe);
+                    }
+                    if (rsiConfig.days_to_list) {
+                        document.getElementById('daysToList').value = rsiConfig.days_to_list;
+                        console.log('Set days to list to:', rsiConfig.days_to_list);
+                    }
+                    
+                    console.log('RSI config loaded successfully');
+                } else {
+                    console.warn('Failed to load RSI config, status:', rsiResponse.status);
+                }
+            } catch (error) {
+                console.error('Error loading RSI config:', error);
+            }
+
+            // Load EMA defaults
+            try {
+                console.log('Fetching EMA config...');
+                const emaResponse = await fetch('/api/config/ema');
+                console.log('EMA config response status:', emaResponse.status);
+                if (emaResponse.ok) {
+                    const emaConfig = await emaResponse.json();
+                    console.log('EMA config data:', emaConfig);
+                    
+                    document.getElementById('emaPeriods').value = (emaConfig.ema_periods || []).join(',');
+                    document.getElementById('emaDaysFallback').value = emaConfig.days_fallback_threshold || '';
+                    
+                    console.log('EMA config loaded successfully');
+                } else {
+                    console.warn('Failed to load EMA config, status:', emaResponse.status);
+                }
+            } catch (error) {
+                console.error('Error loading EMA config:', error);
+            }
+
+            // Load DMA defaults
+            try {
+                console.log('Fetching DMA config...');
+                const dmaResponse = await fetch('/api/config/dma');
+                console.log('DMA config response status:', dmaResponse.status);
+                if (dmaResponse.ok) {
+                    const dmaConfig = await dmaResponse.json();
+                    console.log('DMA config data:', dmaConfig);
+                    
+                    document.getElementById('dmaPeriods').value = (dmaConfig.dma_periods || []).join(',');
+                    document.getElementById('dmaDaysFallback').value = dmaConfig.days_fallback_threshold || '';
+                    
+                    console.log('DMA config loaded successfully');
+                } else {
+                    console.warn('Failed to load DMA config, status:', dmaResponse.status);
+                }
+            } catch (error) {
+                console.error('Error loading DMA config:', error);
+            }
+            
+            console.log('Indicator defaults loading completed');
+        }
+
+        // Load config for specific scanner when scanner type changes
+        async function loadConfigForScanner(scannerType) {
+            console.log(`Loading config for ${scannerType} scanner...`);
+            
+            try {
+                const response = await fetch(`/api/config/${scannerType}`);
+                if (response.ok) {
+                    const config = await response.json();
+                    console.log(`${scannerType} config:`, config);
+                    
+                    // Load timeframe and days from the specific scanner config
+                    if (config.base_timeframe) {
+                        document.getElementById('baseTimeframe').value = config.base_timeframe;
+                    }
+                    if (config.days_to_list) {
+                        document.getElementById('daysToList').value = config.days_to_list;
+                    }
+                    
+                    // Load scanner-specific parameters
+                    if (scannerType === 'rsi') {
+                        if (config.rsi_periods) {
+                            document.getElementById('rsiPeriods').value = config.rsi_periods.join(',');
+                        }
+                        if (config.days_fallback_threshold) {
+                            document.getElementById('rsiDaysFallback').value = config.days_fallback_threshold;
+                        }
+                        if (config.rsi_overbought) {
+                            document.getElementById('rsiOverbought').value = config.rsi_overbought;
+                        }
+                        if (config.rsi_oversold) {
+                            document.getElementById('rsiOversold').value = config.rsi_oversold;
+                        }
+                    } else if (scannerType === 'ema') {
+                        if (config.ema_periods) {
+                            document.getElementById('emaPeriods').value = config.ema_periods.join(',');
+                        }
+                        if (config.days_fallback_threshold) {
+                            document.getElementById('emaDaysFallback').value = config.days_fallback_threshold;
+                        }
+                    } else if (scannerType === 'dma') {
+                        if (config.dma_periods) {
+                            document.getElementById('dmaPeriods').value = config.dma_periods.join(',');
+                        }
+                        if (config.days_fallback_threshold) {
+                            document.getElementById('dmaDaysFallback').value = config.days_fallback_threshold;
+                        }
+                    }
+                    
+                    console.log(`${scannerType} config loaded successfully`);
+                }
+            } catch (error) {
+                console.error(`Error loading ${scannerType} config:`, error);
+            }
+        }
+
+        // Dark mode functionality
+        function toggleDarkMode() {
+            isDarkMode = !isDarkMode;
+            const toggleBtn = document.getElementById('darkModeToggle');
+
+            if (isDarkMode) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                toggleBtn.innerHTML = '<i class="fas fa-sun"></i>'; // Sun emoji
+                localStorage.setItem('darkMode', 'true');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+                toggleBtn.innerHTML = '<i class="fas fa-moon"></i>'; // Moon emoji
+                localStorage.setItem('darkMode', 'false');
+            }
+        }
+
+        function loadDarkModePreference() {
+            const saved = localStorage.getItem('darkMode');
+            const toggleBtn = document.getElementById('darkModeToggle');
+
+            if (saved === 'true') {
+                isDarkMode = true;
+                document.documentElement.setAttribute('data-theme', 'dark');
+                toggleBtn.innerHTML = '<i class="fas fa-sun"></i>'; // Sun emoji
+            } else {
+                isDarkMode = false;
+                document.documentElement.removeAttribute('data-theme');
+                toggleBtn.innerHTML = '<i class="fas fa-moon"></i>'; // Moon emoji
+            }
+        }
+
+    // Handle symbol change - legacy (symbol selector removed)
+    async function onSymbolChange() { /* no-op */ }
+
+        // Show interactive loading state for analysis
+        function showAnalysisLoadingState(symbol) {
+            const analysisDisplay = document.getElementById('analysisDisplay');
+            if (!analysisDisplay) return;
+            
+            analysisDisplay.innerHTML = `
+                <div class="analysis-loading-container">
+                    <div class="analysis-header-card">
+                        <div class="summary-card">
+                            <div class="card-header">
+                                <h3 class="card-title">
+                                    <i class="fas fa-chart-line"></i> ${symbol.toUpperCase()} Analysis
+                                </h3>
+                                <div class="text-muted">
+                                    <i class="fas fa-sync fa-spin"></i> Loading complete analysis...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="analysis-grid">
+                        <!-- Final Recommendation Loading -->
+                        <div class="analysis-row-recommendation">
+                            <div class="analysis-card loading-card">
+                                <div class="card-header">
+                                    <h4><i class="fas fa-bullseye"></i> Final Recommendation</h4>
+                                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Processing...</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Row 2: Chart + RSI -->
+                        <div class="analysis-row-1">
+                            <div class="analysis-card loading-card">
+                                <div class="card-header">
+                                    <h4><i class="fas fa-chart-area"></i> Price Chart</h4>
+                                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Loading chart data...</div>
+                                </div>
+                            </div>
+                            <div class="analysis-card loading-card">
+                                <div class="card-header">
+                                    <h4><i class="fas fa-chart-line"></i> RSI Analysis</h4>
+                                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Calculating RSI...</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Row 3: EMA + DMA -->
+                        <div class="analysis-row-2">
+                            <div class="analysis-card loading-card">
+                                <div class="card-header">
+                                    <h4><i class="fas fa-chart-line"></i> EMA Analysis</h4>
+                                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Calculating EMA...</div>
+                                </div>
+                            </div>
+                            <div class="analysis-card loading-card">
+                                <div class="card-header">
+                                    <h4><i class="fas fa-chart-bar"></i> DMA Analysis</h4>
+                                    <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Calculating DMA...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Universal function to run all scanners
+    async function runAllScanners(symbol = null, isAutoRun = false) {
+            
+            const scanners = ['rsi', 'ema', 'dma'];
+            const originalScanner = currentScanner;
+            const analysisResults = {};
+            
+            // Update progress for each scanner
+            for (let i = 0; i < scanners.length; i++) {
+                const scanner = scanners[i];
+                
+                // Update loading state
+                if (!isAutoRun) {
+                    updateLoadingProgress(scanner.toUpperCase(), i + 1, scanners.length);
+                }
+                
+                console.log(`Running ${scanner.toUpperCase()} scanner...`);
+                
+                // Switch to scanner and load its config
+                currentScanner = scanner;
+                showScannerParams(scanner);
+                await loadConfigForScanner(scanner);
+                
+                // Run the scanner
+                await runScanner();
+                
+                // Store results
+                analysisResults[scanner] = getCurrentAnalysisData(scanner);
+                
+                // Add delay between scanners (except for the last one)
+                if (i < scanners.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
+            
+            // Restore original scanner
+            currentScanner = originalScanner;
+            showScannerParams(originalScanner);
+            
+            // IMPORTANT: Wait for all chart data to be loaded before triggering chart initialization
+            console.log('All scanners completed, waiting for chart data to stabilize...');
+            await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for chart data
+            
+            // Trigger chart initialization after all scanners complete using existing system
+            const analysisDisplay = document.getElementById('analysisDisplay');
+            if (analysisDisplay && analysisDisplay.innerHTML.includes('chart-card')) {
+                console.log('Triggering delayed chart initialization using existing system...');
+                setTimeout(() => {
+                    const hasRSI = scannerChartData.rsi && Object.keys(scannerChartData.rsi).length > 0;
+                    const hasEMA = scannerChartData.ema && Object.keys(scannerChartData.ema).length > 0; 
+                    const hasDMA = scannerChartData.dma && Object.keys(scannerChartData.dma).length > 0;
+                    
+                    console.log('Final chart data check:', {
+                        hasRSI: !!scannerChartData.rsi,
+                        hasEMA: !!scannerChartData.ema,
+                        hasDMA: !!scannerChartData.dma
+                    });
+                    
+                    // Auto-load the first available chart using existing system
+                    if (hasRSI) {
+                        switchAnalysisChartTab('rsi');
+                    } else if (hasEMA) {
+                        switchAnalysisChartTab('ema');
+                    } else if (hasDMA) {
+                        switchAnalysisChartTab('dma');
+                    }
+                }, 200);
+            }
+            
+            return analysisResults;
+        }
+        
+        // Update loading progress for manual runs
+        function updateLoadingProgress(scannerName, current, total) {
+            const analysisDisplay = document.getElementById('analysisDisplay');
+            if (!analysisDisplay) return;
+            
+            const progressElement = analysisDisplay.querySelector('.analysis-loading-container .text-muted');
+            if (progressElement) {
+                progressElement.innerHTML = `
+                    <i class="fas fa-sync fa-spin"></i> 
+                    Running ${scannerName} analysis... (${current}/${total})
+                `;
+            }
+        }
+        
+        // Manual run function for the button (runs across all configured symbols)
+        async function runAllAnalysisManually() {
+            const runBtn = document.getElementById('runAllAnalysisBtn');
+            const original = runBtn ? runBtn.innerHTML : null;
+            try {
+                if (runBtn) { runBtn.disabled = true; runBtn.innerHTML = '<i class="fas fa-sync"></i> Running...'; }
+                await runAllScanners(null, false);
+                console.log('Manual run completed for all scanners');
+            } catch (error) {
+                console.error('Error during manual run:', error);
+            } finally {
+                if (runBtn) { runBtn.disabled = false; runBtn.innerHTML = original; }
+            }
+        }
+        
+        // Get current analysis data for a scanner (placeholder)
+        function getCurrentAnalysisData(scanner) {
+            // This would return the current analysis data
+            // Implementation depends on how data is stored
+            return null;
+        }
+
+        // Update date and time display
+        function updateDateTime() {
+            const now = new Date();
+            const options = {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            };
+            const dateTimeString = now.toLocaleDateString('en-US', options);
+            document.getElementById('currentDateTime').textContent = dateTimeString;
+        }
+
+        // Run scanner
+        async function runScanner() {
+            const runButton = document.getElementById('runButton');
+            const originalText = runButton.innerHTML;
+
+            // Update button state
+            runButton.disabled = true;
+            runButton.innerHTML = '<i class="fas fa-sync"></i> Running...';
+
+            const resultsSection = document.getElementById('resultsSection');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const resultsDisplay = document.getElementById('resultsDisplay');
+            const statusMessage = document.getElementById('statusMessage');
+            const statusText = document.getElementById('statusText');
+
+            // Show loading
+            resultsSection.classList.remove('hidden');
+            loadingIndicator.classList.remove('hidden');
+            resultsDisplay.style.display = 'none';
+            statusMessage.classList.remove('hidden');
+            statusText.textContent = `Running ${currentScanner.toUpperCase()} scanner...`;
+            statusMessage.classList.remove('hidden');
+            document.getElementById('statusMessageInner').className = 'alert alert-info';
+
+            try {
+                // Get parameters
+                const params = getScannerParams(currentScanner);
+
+                // Make API call to run scanner
+                const response = await fetch('/api/run-scanner', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        scanner: currentScanner,
+                        ...params
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Display results
+                loadingIndicator.classList.add('hidden');
+                resultsDisplay.style.display = 'block';
+
+                if (data.output && data.output.trim()) {
+                    // Clean the output to remove any problematic characters
+                    let cleanOutput = data.output.replace(/[\u{1F600}-\u{1F64F}]/gu, '') // Remove emojis
+                                               .replace(/[\u{1F300}-\u{1F5FF}]/gu, '') // Remove symbols
+                                               .replace(/[\u{1F680}-\u{1F6FF}]/gu, '') // Remove transport
+                                               .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '') // Remove flags
+                                               .replace(/[\u{2600}-\u{26FF}]/gu, '');  // Remove misc symbols
+                    document.getElementById('resultsOutput').textContent = cleanOutput;
+                } else {
+                    document.getElementById('resultsOutput').textContent = 'No output received from scanner. Check server logs.';
+                }
+
+                // Store results for export
+                scannerResults[currentScanner] = data.results;
+                scannerOutputs[currentScanner] = data.output;
+                scannerChartData[currentScanner] = data.chartData;
+                
+                // Save current form values to runtime config for future tab switches
+                saveToRuntimeConfig(currentScanner);
+
+                // Update status
+                if (data.returncode === 0) {
+                    statusText.textContent = `${currentScanner.toUpperCase()} scanner completed successfully!`;
+                    document.getElementById('statusMessageInner').className = 'alert alert-success';
+                } else {
+                    statusText.textContent = `${currentScanner.toUpperCase()} scanner completed with errors (code: ${data.returncode})`;
+                    document.getElementById('statusMessageInner').className = 'alert alert-warning';
+                }
+
+                // Create chart if data available
+                if (data.chartData) {
+                    const chartType = document.getElementById('chartTypeSelect').value;
+                    createChart(data.chartData, chartType);
+                }
+
+                // Auto-refresh table if user is currently on table tab
+                const tableTab = document.getElementById('tableTab');
+                if (tableTab && tableTab.classList.contains('active')) {
+                    updateTableDisplay();
+                }
+
+                // Show and update current analysis section
+                const analysisSection = document.getElementById('analysisSection');
+                analysisSection.classList.remove('hidden');
+                updateCurrentAnalysis(currentScanner);
+
+            } catch (error) {
+                console.error('Error running scanner:', error);
+                loadingIndicator.classList.add('hidden');
+                statusText.textContent = `Error: ${error.message}`;
+                statusMessage.classList.remove('hidden');
+                document.getElementById('statusMessageInner').className = 'alert alert-danger';
+                document.getElementById('resultsOutput').textContent = `Scanner execution failed:\n${error.message}`;
+                resultsDisplay.style.display = 'block';
+            } finally {
+                // Reset button
+                runButton.disabled = false;
+                runButton.innerHTML = originalText;
+            }
+        }
+
+        // Get scanner parameters
+        function getScannerParams(scannerType) {
+            const symbolsList = Array.isArray(availableSymbols) && availableSymbols.length > 0
+                ? availableSymbols
+                : [];
+            const tfEl = document.getElementById('globalTimeframe');
+            const chosenTf = tfEl ? tfEl.value : document.getElementById('baseTimeframe')?.value || '15mins';
+            const baseParams = {
+                symbols: symbolsList, // Use all available symbols
+                baseTimeframe: chosenTf,
+                daysToList: parseInt(document.getElementById('daysToList').value)
+            };
+
+            switch (scannerType) {
+                case 'rsi':
+                    return {
+                        ...baseParams,
+                        rsiPeriods: document.getElementById('rsiPeriods').value.split(',').map(p => parseInt(p.trim())),
+                        rsiOverbought: parseInt(document.getElementById('rsiOverbought').value),
+                        rsiOversold: parseInt(document.getElementById('rsiOversold').value),
+                        daysFallbackThreshold: parseInt(document.getElementById('rsiDaysFallback').value)
+                    };
+                case 'ema':
+                    return {
+                        ...baseParams,
+                        emaPeriods: document.getElementById('emaPeriods').value.split(',').map(p => parseInt(p.trim())),
+                        daysFallbackThreshold: parseInt(document.getElementById('emaDaysFallback').value)
+                    };
+                case 'dma':
+                    return {
+                        ...baseParams,
+                        dmaPeriods: document.getElementById('dmaPeriods').value.split(',').map(p => parseInt(p.trim())),
+                        daysFallbackThreshold: parseInt(document.getElementById('dmaDaysFallback').value)
+                    };
+                default:
+                    return baseParams;
+            }
+        }
+
+        // Create chart
+        function createChart(chartData, chartType = 'line') {
+            console.log('Creating chart with type:', chartType);
+            console.log('Chart data:', chartData);
+            
+            const chartContainer = document.getElementById('chartContainer');
+            chartContainer.style.display = 'block';
+
+            const ctx = document.getElementById('priceChart').getContext('2d');
+
+            if (chart) {
+                chart.destroy();
+            }
+
+            // Apply dark mode colors if needed
+            const isDark = isDarkMode;
+            const textColor = isDark ? '#f9fafb' : '#374151';
+            const gridColor = isDark ? '#4b5563' : '#e5e7eb';
+
+            Chart.defaults.color = textColor;
+            Chart.defaults.borderColor = gridColor;
+
+            // Prepare datasets based on chart type
+            let processedDatasets = [];
+
+            if (chartType === 'candlestick') {
+                // Check if financial chart library is available
+                const hasFinancialChart = typeof Chart !== 'undefined' && Chart.controllers && Chart.controllers.candlestick;
+                console.log('Financial chart library available:', hasFinancialChart);
+                
+                const ohlcDataset = chartData.datasets.find(ds => ds.label === 'OHLC');
+                console.log('OHLC Dataset:', ohlcDataset);
+                
+                if (ohlcDataset && ohlcDataset.data && ohlcDataset.data.length > 0) {
+                    console.log('OHLC data sample:', ohlcDataset.data.slice(0, 3));
+                    
+                    if (hasFinancialChart) {
+                        // Use financial chart library
+                        // Simple approach: create candlestick data points
+                        const candlestickData = ohlcDataset.data.map((ohlc, index) => {
+                            if (Array.isArray(ohlc) && ohlc.length >= 4) {
+                                const [open, high, low, close] = ohlc;
+                                return {
+                                    x: index,  // Use simple index for positioning
+                                    o: open,
+                                    h: high,
+                                    l: low,
+                                    c: close
+                                };
+                            }
+                            return null;
+                        }).filter(item => item !== null);
+                        
+                        processedDatasets.push({
+                            label: 'Candlestick',
+                            data: candlestickData,
+                            type: 'candlestick',
+                            color: {
+                                up: 'rgb(34, 197, 94)',
+                                down: 'rgb(239, 68, 68)',
+                                unchanged: 'rgb(59, 130, 246)'
+                            },
+                            borderColor: {
+                                up: 'rgb(34, 197, 94)',
+                                down: 'rgb(239, 68, 68)',
+                                unchanged: 'rgb(59, 130, 246)'
+                            }
+                        });
+                        
+                        // Add indicators to candlestick chart
+                        const indicatorDatasets = chartData.datasets.filter(ds => 
+                            ds.label !== 'OHLC' && 
+                            (ds.label.includes('RSI') || ds.label.includes('EMA') || ds.label.includes('DMA'))
+                        );
+                        
+                        // Add each indicator dataset with styling
+                        indicatorDatasets.forEach(ds => {
+                            // Create simple data mapping with indices
+                            const mappedData = ds.data.map((val, index) => ({
+                                x: index,
+                                y: val
+                            }));
+                            
+                            processedDatasets.push({
+                                label: ds.label,
+                                data: mappedData,
+                                type: 'line',
+                                borderWidth: 2,       // Thicker for better visibility
+                                pointRadius: 0,       // No points for cleaner look
+                                tension: 0.1,         // Slight smoothing for lines
+                                borderColor: ds.borderColor || ds.backgroundColor,
+                                backgroundColor: ds.backgroundColor,
+                                fill: false,
+                                // Send RSI to secondary y-axis
+                                yAxisID: ds.label.includes('RSI') ? 'y1' : 'y'
+                            });
+                        });
+                    } else {
+                        // Fallback: Create simple candlestick representation
+                        console.log('Using fallback candlestick implementation');
+                        
+                        const bodyData = [];
+                        const wickData = [];
+                        
+                        ohlcDataset.data.forEach((ohlc, index) => {
+                            if (Array.isArray(ohlc) && ohlc.length >= 4) {
+                                const [open, high, low, close] = ohlc;
+                                const isGreen = close >= open;
+                                const color = isGreen ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)';
+                                
+                                // Body (open-close)
+                                if (Math.abs(close - open) > 0.01) { // Only show body if there's a difference
+                                    const bodyTop = Math.max(open, close);
+                                    const bodyBottom = Math.min(open, close);
+                                    bodyData.push({
+                                        x: index,
+                                        y: bodyBottom + (bodyTop - bodyBottom) / 2,
+                                        height: bodyTop - bodyBottom,
+                                        color: color
+                                    });
+                                }
+                                
+                                // Wick (high-low) - simplified as points
+                                wickData.push({
+                                    x: index,
+                                    y: low,
+                                    color: color
+                                });
+                                wickData.push({
+                                    x: index,
+                                    y: high,
+                                    color: color
+                                });
+                            }
+                        });
+                        
+                        // Add body bars
+                        if (bodyData.length > 0) {
+                            processedDatasets.push({
+                                label: 'Candlestick Body',
+                                data: bodyData.map(d => d.y),
+                                backgroundColor: bodyData.map(d => d.color),
+                                borderColor: bodyData.map(d => d.color),
+                                type: 'bar',
+                                barThickness: 4,
+                                categoryPercentage: 0.6
+                            });
+                        }
+                        
+                        // Add wick points (simplified)
+                        processedDatasets.push({
+                            label: 'High-Low',
+                            data: wickData,
+                            type: 'scatter',
+                            pointStyle: 'rect',
+                            pointRadius: 2,
+                            backgroundColor: wickData.map(d => d.color),
+                            borderColor: wickData.map(d => d.color)
+                        });
+                    }
+
+                } else {
+                    console.warn('No OHLC data available, falling back to line chart');
+                    chartType = 'line';
+                }
+            }
+
+            if (chartType === 'line') {
+                // Start fresh and build datasets properly
+                processedDatasets = [];
+
+                // Add all non-OHLC datasets first
+                const allLineDatasets = chartData.datasets.filter(ds => ds.label !== 'OHLC');
+
+                // Process each dataset with appropriate styling
+                allLineDatasets.forEach(ds => {
+                    if (ds.label === 'Close Price') {
+                        // Special styling for Close Price
+                        processedDatasets.push({
+                            ...ds,
+                            borderWidth: 3,  // Thicker for prominence
+                            borderColor: '#2563eb',  // Blue color
+                            backgroundColor: '#2563eb',
+                            pointRadius: 2,  // Small points for visibility
+                            fill: false,  // No fill for line chart
+                            type: 'line'  // Force line type
+                        });
+                    } else if (ds.label.includes('RSI') || ds.label.includes('EMA') || ds.label.includes('DMA')) {
+                        // Thinner styling for indicators
+                        processedDatasets.push({
+                            ...ds,
+                            borderWidth: 1,  // Thinner for indicators
+                            pointRadius: 0,  // No points for cleaner look
+                            type: 'line'  // Force line type for indicators
+                        });
+                    } else {
+                        // Default styling for other datasets
+                        processedDatasets.push({
+                            ...ds,
+                            type: 'line'  // Force line type
+                        });
+                    }
+                });
+            }
+
+            // Prepare scales configuration
+            const scales = {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: 'Time',
+                        color: textColor
+                    },
+                    grid: {
+                        color: gridColor
+                    },
+                    ticks: {
+                        color: textColor
+                    }
+                },
+                y: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: 'Price',
+                        color: textColor
+                    },
+                    grid: {
+                        color: gridColor
+                    },
+                    ticks: {
+                        color: textColor
+                    }
+                }
+            };
+
+            // For candlestick charts, we need specialized scale configuration
+            if (chartType === 'candlestick') {
+                // Simple approach: set up basic time labels
+                scales.x = {
+                    type: 'linear',
+                    position: 'bottom',
+                    title: {
+                        display: true,
+                        text: 'Time',
+                        color: textColor
+                    },
+                    grid: {
+                        color: gridColor,
+                        drawOnChartArea: true
+                    },
+                    ticks: {
+                        stepSize: 5,  // Show a label every 5 data points
+                        callback: function(value) {
+                            // Only show labels for integer indices that match data points
+                            if (Number.isInteger(value) && 
+                                chartData.labels && 
+                                value >= 0 && 
+                                value < chartData.labels.length) {
+                                
+                                // Get the label at this index
+                                const label = chartData.labels[value];
+                                
+                                // Format time label
+                                if (typeof label === 'string') {
+                                    if (label.includes(':')) {
+                                        // Extract just time portion if it has a colon
+                                        return label.split(' ').find(part => part.includes(':')) || label;
+                                    }
+                                    return label;
+                                }
+                                return label;
+                            }
+                            return '';
+                        },
+                        color: textColor,
+                        maxRotation: 0,
+                        autoSkip: false,
+                        font: {
+                            size: 10  // Slightly smaller font for more labels
+                        }
+                    }
+                }
+            }
+
+            // Add secondary Y-axis for RSI
+            if (currentScanner === 'rsi') {
+                scales.y1 = {
+                    display: true,
+                    position: 'right',
+                    title: {
+                        display: true,
+                        text: 'RSI',
+                        color: textColor
+                    },
+                    grid: {
+                        drawOnChartArea: false,
+                        color: gridColor
+                    },
+                    ticks: {
+                        color: textColor,
+                        min: 0,
+                        max: 100
+                    }
+                };
+            }
+
+            chart = new Chart(ctx, {
+                type: (chartType === 'candlestick' && typeof Chart !== 'undefined' && Chart.controllers && Chart.controllers.candlestick) ? 'candlestick' : 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: processedDatasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: scales,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: textColor
+                            }
+                        },
+                        tooltip: {
+                            // Custom tooltip to show proper time labels
+                            callbacks: {
+                                title: function(tooltipItems) {
+                                    // Get index from the candlestick data point
+                                    const index = tooltipItems[0].dataIndex;
+                                    // Use that to lookup the actual time label
+                                    if (chartData.labels && index >= 0 && index < chartData.labels.length) {
+                                        return chartData.labels[index];
+                                    }
+                                    return '';
+                                },
+                                label: function(context) {
+                                    // Different formatting for different dataset types
+                                    const label = context.dataset.label || '';
+                                    
+                                    if (label === 'Candlestick') {
+                                        const dataPoint = context.raw;
+                                        if (dataPoint) {
+                                            return [
+                                                `O: ${dataPoint.o.toFixed(1)}`,
+                                                `H: ${dataPoint.h.toFixed(1)}`,
+                                                `L: ${dataPoint.l.toFixed(1)}`,
+                                                `C: ${dataPoint.c.toFixed(1)}`
+                                            ];
+                                        }
+                                    } else if (label.includes('RSI')) {
+                                        const value = context.parsed.y;
+                                        return `${label}: ${value.toFixed(3)}`;
+                                    }
+                                    
+                                    // Default label formatting
+                                    const value = context.parsed.y;
+                                    return `${label}: ${value}`;
+                                }
+                            },
+                            backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.8)' : 'rgba(255, 255, 255, 0.8)',
+                            titleColor: textColor,
+                            bodyColor: textColor,
+                            borderColor: gridColor,
+                            borderWidth: 1
+                        }
+                    },
+                    elements: {
+                        point: {
+                            radius: 2,
+                            hoverRadius: 4
+                        },
+                        line: {
+                            borderWidth: 2
+                        }
+                    }
+                }
+            });
+        }
+
+        // Export results
+        function exportResults() {
+            if (!scannerResults[currentScanner]) {
+                alert('No results to export. Please run a scanner first.');
+                return;
+            }
+
+            const csvContent = convertToCSV(scannerResults[currentScanner]);
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `${currentScanner}_results_${new Date().toISOString().split('T')[0]}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
+        // Convert results to CSV
+        function convertToCSV(data) {
+            if (!data || !Array.isArray(data) || data.length === 0) {
+                return '';
+            }
+
+            const headers = Object.keys(data[0]);
+            const csvRows = [];
+
+            // Add headers
+            csvRows.push(headers.join(','));
+
+            // Add data rows
+            data.forEach(row => {
+                const values = headers.map(header => {
+                    const value = row[header];
+                    // Handle null/undefined values and escape commas/quotes
+                    if (value === null || value === undefined) {
+                        return '';
+                    }
+                    const stringValue = String(value);
+                    if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+                        return `"${stringValue.replace(/"/g, '""')}"`;
+                    }
+                    return stringValue;
+                });
+                csvRows.push(values.join(','));
+            });
+
+            return csvRows.join('\n');
+        }
+
+        // Change chart type when dropdown is changed
+        function changeChartType() {
+            const chartType = document.getElementById('chartTypeSelect').value;
+            currentChartType = chartType;
+            console.log('Chart type changed to:', chartType);
+            
+            // Recreate chart with new type
+            if (scannerChartData[currentScanner]) {
+                createChart(scannerChartData[currentScanner], chartType);
+            }
+        }
+        
+        // Clear results
+        function clearResults() {
+            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('statusMessage').classList.add('hidden');
+            document.getElementById('chartContainer').style.display = 'none';
+            document.getElementById('resultsOutput').textContent = '';
+            scannerResults = {
+                rsi: null,
+                ema: null,
+                dma: null
+            };
+
+            if (chart) {
+                chart.destroy();
+                chart = null;
+            }
+        }
+
+        // Clear all results and hide section
+        function clearAllResults() {
+            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('statusMessage').classList.add('hidden');
+            document.getElementById('chartContainer').style.display = 'none';
+            document.getElementById('resultsOutput').textContent = '';
+            scannerResults = {
+                rsi: null,
+                ema: null,
+                dma: null
+            };
+
+            // Reset tabs to default state
+            document.querySelectorAll('.tab-button').forEach(tab => tab.classList.remove('active'));
+            document.getElementById('tableTab').classList.add('active');
+
+            // Hide all content and show table
+            document.getElementById('resultsTabContent').classList.add('hidden');
+            document.getElementById('chartTabContent').classList.add('hidden');
+            document.getElementById('tableTabContent').classList.remove('hidden');
+        }
+
+        // Switch between scanner tabs
+        function switchScannerTab(scannerType) {
+            // Update current scanner
+            currentScanner = scannerType;
+
+            // Update scanner type dropdown
+            document.getElementById('scannerType').value = scannerType;
+
+            // Update tab styles - reset all
+            document.querySelectorAll('#rsiScannerTab, #emaScannerTab, #dmaScannerTab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Set active tab
+            const activeTab = document.getElementById(scannerType + 'ScannerTab');
+            if (activeTab) {
+                activeTab.classList.add('active');
+            }
+
+            // Show scanner parameters
+            showScannerParams(scannerType);
+            
+            // Try to load from runtime config first, fallback to base config if not available
+            const loadedFromRuntime = loadFromRuntimeConfig(scannerType);
+            if (!loadedFromRuntime) {
+                // Load config from base config file (first time access)
+                loadConfigForScanner(scannerType);
+            }
+
+            // Fetch stored results for this scanner
+            fetchStoredResults(scannerType);
+        }
+
+        // Fetch stored results from server
+        async function fetchStoredResults(scannerType) {
+            try {
+                const response = await fetch(`/api/scanner-results/${scannerType}`);
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Store results locally
+                    scannerResults[scannerType] = data.results;
+                    scannerOutputs[scannerType] = data.output || '';
+                    scannerChartData[scannerType] = data.chart_data;
+
+                    // Display results
+                    displayScannerResults(scannerType);
+
+                    // Show results section if we have data
+                    const resultsSection = document.getElementById('resultsSection');
+                    if (data.results || data.output) {
+                        resultsSection.classList.remove('hidden');
+                    }
+                } else {
+                    console.warn(`No stored results for ${scannerType}`);
+                    displayScannerResults(scannerType);
+                }
+            } catch (error) {
+                console.error('Error fetching stored results:', error);
+                displayScannerResults(scannerType);
+            }
+        }
+
+        // Switch between content tabs (Table/Chart/Results)
+        function switchContentTab(tab) {
+            const resultsTabContent = document.getElementById('resultsTabContent');
+            const tableTabContent = document.getElementById('tableTabContent');
+            const chartTabContent = document.getElementById('chartTabContent');
+            const resultsTab = document.getElementById('resultsTab');
+            const tableTab = document.getElementById('tableTab');
+            const chartTab = document.getElementById('chartTab');
+
+            // Reset all tab styles
+            resultsTab.classList.remove('active');
+            tableTab.classList.remove('active');
+            chartTab.classList.remove('active');
+
+            // Hide all content
+            resultsTabContent.classList.add('hidden');
+            tableTabContent.classList.add('hidden');
+            chartTabContent.classList.add('hidden');
+
+            if (tab === 'table') {
+                tableTab.classList.add('active');
+                tableTabContent.classList.remove('hidden');
+                // Update table display when switching to table tab
+                updateTableDisplay();
+            } else if (tab === 'chart') {
+                chartTab.classList.add('active');
+                chartTabContent.classList.remove('hidden');
+                // Recreate chart with current type when switching to chart tab
+                if (scannerChartData[currentScanner]) {
+                    const chartType = document.getElementById('chartTypeSelect').value;
+                    createChart(scannerChartData[currentScanner], chartType);
+                }
+            } else if (tab === 'results') {
+                resultsTab.classList.add('active');
+                resultsTabContent.classList.remove('hidden');
+            }
+        }
+
+        // Convert DD-MM-YYYY H:MM:SS format to JavaScript Date
+        function convertTimeStringToDate(timeStr) {
+            if (!timeStr || timeStr.trim() === '') {
+                return null;
+            }
+            
+            // Expected format: "16-09-2025 14:15:00"
+            const parts = timeStr.trim().split(' ');
+            if (parts.length !== 2) {
+                return null;
+            }
+            
+            const datePart = parts[0]; // "16-09-2025"
+            const timePart = parts[1]; // "14:15:00"
+            
+            const dateComponents = datePart.split('-');
+            if (dateComponents.length !== 3) {
+                return null;
+            }
+            
+            const day = parseInt(dateComponents[0]);
+            const month = parseInt(dateComponents[1]) - 1; // JavaScript months are 0-based
+            const year = parseInt(dateComponents[2]);
+            
+            const timeComponents = timePart.split(':');
+            if (timeComponents.length !== 3) {
+                return null;
+            }
+            
+            const hour = parseInt(timeComponents[0]);
+            const minute = parseInt(timeComponents[1]);
+            const second = parseInt(timeComponents[2]);
+            
+            return new Date(year, month, day, hour, minute, second);
+        }
+
+        // Save current form values to runtime config for the current scanner
+        function saveToRuntimeConfig(scannerType) {
+            const config = {
+                symbol: document.getElementById('symbols') ? document.getElementById('symbols').value : null,
+                baseTimeframe: (document.getElementById('globalTimeframe')?.value || document.getElementById('baseTimeframe')?.value),
+                daysToList: parseInt(document.getElementById('daysToList').value)
+            };
+            
+            // Add scanner-specific parameters
+            if (scannerType === 'rsi') {
+                config.rsiPeriods = document.getElementById('rsiPeriods').value;
+                config.rsiOverbought = parseInt(document.getElementById('rsiOverbought').value);
+                config.rsiOversold = parseInt(document.getElementById('rsiOversold').value);
+                config.daysFallbackThreshold = parseInt(document.getElementById('rsiDaysFallback').value);
+            } else if (scannerType === 'ema') {
+                config.emaPeriods = document.getElementById('emaPeriods').value;
+                config.daysFallbackThreshold = parseInt(document.getElementById('emaDaysFallback').value);
+            } else if (scannerType === 'dma') {
+                config.dmaPeriods = document.getElementById('dmaPeriods').value;
+                config.daysFallbackThreshold = parseInt(document.getElementById('dmaDaysFallback').value);
+            }
+            
+            runtimeConfig[scannerType] = config;
+            useRuntimeConfig = true;
+            console.log(`Saved runtime config for ${scannerType}:`, config);
+        }
+        
+        // Load form values from runtime config for the specified scanner
+        function loadFromRuntimeConfig(scannerType) {
+            if (!useRuntimeConfig || !runtimeConfig[scannerType] || Object.keys(runtimeConfig[scannerType]).length === 0) {
+                console.log(`No runtime config for ${scannerType}, will load from base config`);
+                return false;
+            }
+            
+            const config = runtimeConfig[scannerType];
+            console.log(`Loading runtime config for ${scannerType}:`, config);
+            
+            // Load base parameters
+            if (config.symbol && document.getElementById('symbols')) {
+                document.getElementById('symbols').value = config.symbol;
+            }
+            if (config.baseTimeframe) {
+                if (document.getElementById('globalTimeframe')) {
+                    document.getElementById('globalTimeframe').value = config.baseTimeframe;
+                } else if (document.getElementById('baseTimeframe')) {
+                    document.getElementById('baseTimeframe').value = config.baseTimeframe;
+                }
+            }
+            if (config.daysToList) {
+                document.getElementById('daysToList').value = config.daysToList;
+            }
+            
+            // Load scanner-specific parameters
+            if (scannerType === 'rsi') {
+                if (config.rsiPeriods) {
+                    document.getElementById('rsiPeriods').value = config.rsiPeriods;
+                }
+                if (config.rsiOverbought) {
+                    document.getElementById('rsiOverbought').value = config.rsiOverbought;
+                }
+                if (config.rsiOversold) {
+                    document.getElementById('rsiOversold').value = config.rsiOversold;
+                }
+                if (config.daysFallbackThreshold) {
+                    document.getElementById('rsiDaysFallback').value = config.daysFallbackThreshold;
+                }
+            } else if (scannerType === 'ema') {
+                if (config.emaPeriods) {
+                    document.getElementById('emaPeriods').value = config.emaPeriods;
+                }
+                if (config.daysFallbackThreshold) {
+                    document.getElementById('emaDaysFallback').value = config.daysFallbackThreshold;
+                }
+            } else if (scannerType === 'dma') {
+                if (config.dmaPeriods) {
+                    document.getElementById('dmaPeriods').value = config.dmaPeriods;
+                }
+                if (config.daysFallbackThreshold) {
+                    document.getElementById('dmaDaysFallback').value = config.daysFallbackThreshold;
+                }
+            }
+            
+            return true;
+        }
+
+        // Update table display
+        function updateTableDisplay() {
+            const output = scannerOutputs[currentScanner];
+            if (!output || !output.trim()) {
+                document.getElementById('tableMessage').textContent = 'No data available. Please run a scanner first.';
+                document.getElementById('tableMessage').classList.remove('hidden');
+                document.getElementById('resultsTable').classList.add('hidden');
+                return;
+            }
+
+            const tableData = parseScannerOutput(output);
+            if (tableData && tableData.length > 0) {
+                renderTable(tableData);
+                document.getElementById('tableMessage').classList.add('hidden');
+                document.getElementById('resultsTable').classList.remove('hidden');
+            } else {
+                document.getElementById('tableMessage').textContent = 'Unable to parse scanner output. Please check the Results tab.';
+                document.getElementById('tableMessage').classList.remove('hidden');
+                document.getElementById('resultsTable').classList.add('hidden');
+            }
+        }
+
+        // Parse scanner output into table data
+        function parseScannerOutput(output) {
+            const lines = output.split('\n').filter(line => line.trim());
+            const tableData = [];
+
+            // Find the table section (look for lines with | separators)
+            let inTable = false;
+            let headers = [];
+
+            for (const line of lines) {
+                if (line.includes('|') && !line.includes('=')) {
+                    const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell);
+
+                    if (!inTable) {
+                        // This might be headers
+                        if (cells.length >= 3 && cells.some(cell => cell.toUpperCase().includes('TIME') || cell.toUpperCase().includes('SYMBOL') || cell.toUpperCase().includes('CMP'))) {
+                            headers = cells;
+                            inTable = true;
+                        }
+                    } else {
+                        // This is data
+                        if (cells.length === headers.length) {
+                            const row = {};
+                            headers.forEach((header, index) => {
+                                row[header] = cells[index] || '';
+                            });
+                            tableData.push(row);
+                        }
+                    }
+                } else if (line.includes('=') && inTable) {
+                    // End of table
+                    break;
+                }
+            }
+
+            return tableData;
+        }
+
+        // Render table with data
+        function renderTable(data) {
+            const tableBody = document.getElementById('tableBody');
+            const tableHeaderRow = document.getElementById('tableHeaderRow');
+
+            if (data.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="4" class="px-4 py-2 text-center muted-text">No data to display</td></tr>';
+                return;
+            }
+
+            // Sort data based on current sort settings (only for Time column)
+            const sortedData = [...data].sort((a, b) => {
+                if (currentSortColumn === 'Time') {
+                    // Convert DD-MM-YYYY H:MM:SS format to proper Date
+                    let aTime, bTime;
+                    try {
+                        aTime = convertTimeStringToDate(a['Time'] || '');
+                        bTime = convertTimeStringToDate(b['Time'] || '');
+                    } catch (e) {
+                        return 0;
+                    }
+                    
+                    // Handle invalid dates
+                    if (!aTime || !bTime || isNaN(aTime.getTime()) || isNaN(bTime.getTime())) {
+                        return 0;
+                    }
+                    
+                    return currentSortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+                }
+                return 0; // No sorting for other columns
+            });
+
+            // Get headers from first row
+            const headers = Object.keys(sortedData[0]);
+
+            // Create separate header cells for each indicator
+            const indicatorCols = headers.filter(h => !['Time', 'Symbol', 'CMP'].includes(h));
+
+            // Clear existing indicator headers
+            const existingHeaders = tableHeaderRow.querySelectorAll('th');
+            existingHeaders.forEach((header, index) => {
+                if (index > 2) header.remove(); // Remove headers beyond Time, Symbol, CMP
+            });
+
+            // Add indicator headers as separate th elements (non-sortable)
+            indicatorCols.forEach(col => {
+                const th = document.createElement('th');
+                th.className = 'non-sortable'; // Remove sortable class
+                // Remove onclick - no sorting for indicator columns
+                th.innerHTML = `${col} <span></span>`;
+                tableHeaderRow.appendChild(th);
+            });
+
+            // Update sort icons
+            updateSortIcons();
+
+            // Update colspan for empty message
+            const totalCols = 3 + indicatorCols.length; // Time, Symbol, CMP + indicators
+
+            // Limit rows based on selection
+            const rowsSelect = document.getElementById('tableRowsSelect');
+            const maxRows = rowsSelect.value === 'all' ? sortedData.length : parseInt(rowsSelect.value);
+            const displayData = sortedData.slice(0, maxRows);
+
+            // Generate table rows
+            const rows = displayData.map(row => {
+                const time = row['Time'] || '';
+                const symbol = row['Symbol'] || '';
+                const cmp = row['CMP'] || '';
+
+                // Create indicator cells
+                const indicatorCells = indicatorCols.map(col => {
+                    const value = row[col] || '';
+                    let cellClass = '';
+
+                    // Color coding for RSI values
+                    if (col.toUpperCase().includes('RSI')) {
+                        const numValue = parseFloat(value);
+                        if (!isNaN(numValue)) {
+                            const overboughtThreshold = parseInt(document.getElementById('rsiOverbought').value) || 70;
+                            const oversoldThreshold = parseInt(document.getElementById('rsiOversold').value) || 30;
+
+                            if (numValue >= overboughtThreshold) {
+                                cellClass = 'cell-overbought';
+                            } else if (numValue <= oversoldThreshold) {
+                                cellClass = 'cell-oversold';
+                            }
+                        }
+                    }
+
+                    // Color coding for EMA values with cross-period comparison
+                    if (col.toUpperCase().includes('EMA')) {
+                        const period = parseInt(col.replace('EMA', ''));
+                        const numValue = parseFloat(value);
+
+                        if (!isNaN(numValue)) {
+                            if (period === 9 || period === 15) {
+                                const ema9Value = row['EMA9'] ? parseFloat(row['EMA9']) : null;
+                                const ema15Value = row['EMA15'] ? parseFloat(row['EMA15']) : null;
+
+                                if (ema9Value !== null && ema15Value !== null && !isNaN(ema9Value) && !isNaN(ema15Value)) {
+                                    if (ema9Value > ema15Value) {
+                                        cellClass = 'cell-bull';
+                                    } else {
+                                        cellClass = 'cell-bear';
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Color coding for DMA values (compare with CMP)
+                    if (col.toUpperCase().includes('DMA')) {
+                        const numValue = parseFloat(value);
+                        const cmpValue = row['CMP'] ? parseFloat(row['CMP']) : null;
+
+                        if (!isNaN(numValue) && cmpValue !== null && !isNaN(cmpValue)) {
+                            if (numValue < cmpValue) {
+                                cellClass = 'cell-bull';
+                            } else {
+                                cellClass = 'cell-bear';
+                            }
+                        }
+                    }
+
+                    return `<td class="${cellClass}">${value}</td>`;
+                }).join('');
+
+                return `
+                    <tr>
+                        <td>${time}</td>
+                        <td>${symbol}</td>
+                        <td>${cmp}</td>
+                        ${indicatorCells}
+                    </tr>
+                `;
+            }).join('');
+
+            tableBody.innerHTML = rows;
+
+            // Update empty message colspan
+            const emptyRow = tableBody.querySelector('tr td[colspan]');
+            if (emptyRow) {
+                emptyRow.setAttribute('colspan', totalCols);
+            }
+        }
+
+        // Display stored results for a scanner
+        function displayScannerResults(scannerType) {
+            const resultsOutput = document.getElementById('resultsOutput');
+            const chartContainer = document.getElementById('chartContainer');
+            const resultsSection = document.getElementById('resultsSection');
+
+            // Display text output
+            if (scannerOutputs[scannerType] && scannerOutputs[scannerType].trim()) {
+                resultsOutput.textContent = scannerOutputs[scannerType];
+                resultsSection.classList.remove('hidden');
+            } else {
+                resultsOutput.textContent = `No results available for ${scannerType.toUpperCase()} scanner.\n\nClick "Run" to execute the scanner and generate results.`;
+                resultsSection.classList.add('hidden');
+            }
+
+            // Display chart if available
+            if (scannerChartData[scannerType]) {
+                const chartType = document.getElementById('chartTypeSelect').value;
+                createChart(scannerChartData[scannerType], chartType);
+                chartContainer.style.display = 'block';
+            } else {
+                chartContainer.style.display = 'none';
+                if (chart) {
+                    chart.destroy();
+                    chart = null;
+                }
+            }
+
+            // Update table display
+            updateTableDisplay();
+
+            // Update all analyses (unified view)
+            updateAllAnalyses();
+        }
+
+
+
+        // Update current analysis display
+        function updateCurrentAnalysis(scannerType) {
+            // Always update all analyses when any scanner completes
+            updateAllAnalyses();
+        }
+
+        // Update all analyses in one comprehensive view
+        function updateAllAnalyses() {
+            const analysisMessage = document.getElementById('analysisMessage');
+            const analysisDisplay = document.getElementById('analysisDisplay');
+
+            // Use structured results (preferred for multi-symbol summary)
+            const hasRSI = Array.isArray(scannerResults['rsi']) && scannerResults['rsi'].length > 0;
+            const hasEMA = Array.isArray(scannerResults['ema']) && scannerResults['ema'].length > 0;
+            const hasDMA = Array.isArray(scannerResults['dma']) && scannerResults['dma'].length > 0;
+
+            if (!hasRSI && !hasEMA && !hasDMA) {
+                analysisMessage.textContent = 'No analysis available. Please run scanners first to see trading signals.';
+                analysisMessage.classList.remove('hidden');
+                analysisDisplay.classList.add('hidden');
+                return;
+            }
+
+            // Render only the summary table (multi-symbol)
+            renderUnifiedAnalysis({});
+            analysisMessage.classList.add('hidden');
+            analysisDisplay.classList.remove('hidden');
+        }
+
+        // Render unified analysis showing only the summary table
+        function renderUnifiedAnalysis(analyses) {
+            const analysisDisplay = document.getElementById('analysisDisplay');
+            // Update header summary with analysis data
+            updateHeaderSummary(analyses);
+            // Only render the summary table (no other cards/sections)
+            const html = renderAnalysisSummaryTable(analyses);
+            analysisDisplay.innerHTML = html;
+        }
+
+        // Build the summary table using existing values only
+    function renderAnalysisSummaryTable(analyses) {
+            // Collect results arrays for each scanner
+            const rsiArr = Array.isArray(scannerResults.rsi) ? scannerResults.rsi : [];
+            const emaArr = Array.isArray(scannerResults.ema) ? scannerResults.ema : [];
+            const dmaArr = Array.isArray(scannerResults.dma) ? scannerResults.dma : [];
+
+            // Index by symbol for quick lookup
+            const bySymbol = {};
+            const addRows = (arr, key) => {
+                arr.forEach(row => {
+                    const sym = (row.Symbol || row.symbol || '').toString();
+                    if (!sym) return;
+                    bySymbol[sym] = bySymbol[sym] || { rsi: null, ema: null, dma: null };
+                    bySymbol[sym][key] = row;
+                });
+            };
+            addRows(rsiArr, 'rsi');
+            addRows(emaArr, 'ema');
+            addRows(dmaArr, 'dma');
+
+            // Determine dynamic indicator headers
+            const collectKeys = (rows, matches) => {
+                const set = new Set();
+                const arr = Array.isArray(matches) ? matches : [matches];
+                rows.forEach(r => Object.keys(r || {}).forEach(k => {
+                    const ku = k.toUpperCase();
+                    if (arr.some(m => ku.includes(String(m).toUpperCase()))) set.add(k);
+                }));
+                return Array.from(set);
+            };
+            const sortByNumber = keys => keys.sort((a,b) => {
+                const na = parseInt((a.match(/\d+/) || ['0'])[0], 10);
+                const nb = parseInt((b.match(/\d+/) || ['0'])[0], 10);
+                return na - nb;
+            });
+
+            const rsiKeys = sortByNumber(collectKeys(rsiArr, ['RSI', 'rsi_']));
+            const emaKeys = sortByNumber(collectKeys(emaArr, ['EMA', 'ema_']));
+            const dmaKeys = sortByNumber(collectKeys(dmaArr, ['DMA', 'dma_']));
+
+            const displayIndicatorLabel = (key) => {
+                if (key.includes('_')) {
+                    const [name, num] = key.split('_');
+                    return `${name.toUpperCase()}${num || ''}`;
+                }
+                return key;
+            };
+
+        const thead = `
+                <tr>
+                    <th>Symbol</th>
+                    <th>Price</th>
+                    <th>Change%</th>
+                    ${rsiKeys.map(k => `<th>${displayIndicatorLabel(k)}</th>`).join('')}
+                    ${emaKeys.map(k => `<th>${displayIndicatorLabel(k)}</th>`).join('')}
+                    ${dmaKeys.map(k => `<th>${displayIndicatorLabel(k)}</th>`).join('')}
+            <th>Reco</th>
+                    <th>Chart</th>
+                </tr>
+            `;
+
+            const rsiOverbought = parseInt(document.getElementById('rsiOverbought')?.value) || 70;
+            const rsiOversold = parseInt(document.getElementById('rsiOversold')?.value) || 30;
+
+            const getRaw = (src, key) => {
+                if (!src || !(key in src) || src[key] === undefined || src[key] === null) return '—';
+                const v = src[key];
+                const num = parseFloat(v);
+                return isNaN(num) ? '—' : num;
+            };
+            const fmt = (num) => (num === '—' || num === null || typeof num === 'undefined') ? '—' : Number(num).toFixed(2);
+            const fmtPct = (val) => (val === '—' || !isFinite(val)) ? '—' : `${val > 0 ? '+' : ''}${val.toFixed(2)}%`;
+
+            const rowsHtml = Object.keys(bySymbol).sort().map(sym => {
+                const rrow = bySymbol[sym].rsi;
+                const erow = bySymbol[sym].ema;
+                const drow = bySymbol[sym].dma;
+
+                const cmpRaw = (rrow && (rrow.CMP ?? rrow.close ?? rrow.Close))
+                             || (erow && (erow.CMP ?? erow.close ?? erow.Close))
+                             || (drow && (drow.CMP ?? drow.close ?? drow.Close))
+                             || null;
+                const cmpNum = cmpRaw !== null && !isNaN(parseFloat(cmpRaw)) ? parseFloat(cmpRaw) : null;
+                const cmp = cmpNum !== null ? cmpNum.toFixed(2) : '—';
+                const chg = (rrow && rrow['Change%']) || (erow && erow['Change%']) || (drow && drow['Change%']) || '—';
+                // Color helpers
+                const rsiVals = rsiKeys.map(k => {
+                    const num = getRaw(rrow, k);
+                    const color = (num === '—') ? 'var(--text-secondary)'
+                                 : (num >= rsiOverbought ? 'var(--danger)'
+                                    : (num <= rsiOversold ? 'var(--success)' : 'var(--text-secondary)'));
+                    return `<td><span style="color:${color}">${fmt(num)}</span></td>`;
+                }).join('');
+                const emaVals = emaKeys.map(k => {
+                    const num = getRaw(erow, k);
+                    const color = (num === '—' || cmpNum === null || Number(num) === 0) ? 'var(--text-secondary)'
+                                 : (cmpNum > Number(num) ? 'var(--success)'
+                                    : (cmpNum < Number(num) ? 'var(--danger)' : 'var(--text-secondary)'));
+                    const pct = (num === '—' || cmpNum === null || Number(num) === 0) ? '—' : ((cmpNum - Number(num)) / Number(num)) * 100;
+                    const label = displayIndicatorLabel(k);
+                    const content = showPctDiff ? fmtPct(pct) : fmt(num);
+                    const title = showPctDiff ? `${label}: ${fmt(num)}` : `${label}: ${fmtPct(pct)} vs CMP`;
+                    return `<td><span style="color:${color}" title="${title}">${content}</span></td>`;
+                }).join('');
+                const dmaVals = dmaKeys.map(k => {
+                    const num = getRaw(drow, k);
+                    const color = (num === '—' || cmpNum === null || Number(num) === 0) ? 'var(--text-secondary)'
+                                 : (cmpNum > Number(num) ? 'var(--success)'
+                                    : (cmpNum < Number(num) ? 'var(--danger)' : 'var(--text-secondary)'));
+                    const pct = (num === '—' || cmpNum === null || Number(num) === 0) ? '—' : ((cmpNum - Number(num)) / Number(num)) * 100;
+                    const label = displayIndicatorLabel(k);
+                    const content = showPctDiff ? fmtPct(pct) : fmt(num);
+                    const title = showPctDiff ? `${label}: ${fmt(num)}` : `${label}: ${fmtPct(pct)} vs CMP`;
+                    return `<td><span style="color:${color}" title="${title}">${content}</span></td>`;
+                }).join('');
+
+                const reco = computeOverallRecommendationSignal({ rsi: rrow, ema: erow, dma: drow });
+                const recoColor = reco.type === 'bullish' ? 'var(--success)'
+                                 : reco.type === 'bearish' ? 'var(--danger)'
+                                 : 'var(--text-secondary)';
+
+                return `
+                    <tr>
+                        <td  style="font-weight: bold;">${sym}</td>
+                        <td>${cmp}</td>
+                        <td>${chg}</td>
+                        ${rsiVals}
+                        ${emaVals}
+                        ${dmaVals}
+                        <td><span class="badge" style="background: transparent; font-weight: bold; color: ${recoColor};">${reco.text}</span></td>
+                        <td><a href="#" title="Open Chart" onclick="openPriceChart('${sym}'); return false;"><i class="fas fa-chart-line" style="color: var(--text-primary);"></i></a></td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <div class="panel" id="analysisSummaryPanel" style="margin-top: 1rem;">
+                    <div class="panel-content">
+                        <div class="table-controls" style="display:flex; justify-content:flex-end; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                            <label class="form-label" for="togglePctDiff" style="display:flex; align-items:center; gap:0.4rem; margin:0;">
+                                <input type="checkbox" id="togglePctDiff" ${showPctDiff ? 'checked' : ''} onchange="togglePctView()" />
+                                <span>EMA/DMA as %</span>
+                            </label>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table" id="analysisSummaryTable">
+                                <thead>${thead}</thead>
+                                <tbody>${rowsHtml}</tbody>
+                            </table>
+                        </div>
+                        <small class="muted-text">Change% is shown only if present in current results. Indicators reflect last available row per symbol.</small>
+                        <div class="muted-text" style="font-size: 0.8rem; margin-top: 0.5rem; line-height: 1.4;">
+                            <strong>Legend:</strong>
+                            <span style="margin-left: 0.25rem; color: var(--success);">Green</span> = bullish
+                            <span style="margin-left: 0.5rem; color: var(--danger);">Red</span> = bearish
+                            <span style="margin-left: 0.5rem; color: var(--text-secondary);">Grey</span> = neutral
+                            <br/>
+                            RSI: <span style="color: var(--danger);">Red</span> when value ≥ ${rsiOverbought}, <span style="color: var(--success);">Green</span> when value ≤ ${rsiOversold}, otherwise <span style="color: var(--text-secondary);">Grey</span>.
+                            <br/>
+                            EMA/DMA: <span style="color: var(--success);">Green</span> if CMP > indicator, <span style="color: var(--danger);">Red</span> if CMP < indicator, <span style="color: var(--text-secondary);">Grey</span> if equal or unavailable.
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function togglePctView() {
+            const el = document.getElementById('togglePctDiff');
+            if (el) showPctDiff = !!el.checked; else showPctDiff = !showPctDiff;
+            // Re-render the unified analysis to reflect the new view
+            updateAllAnalyses();
+        }
+
+        // Derive BUY/SELL/HOLD using existing thresholds and values (no new data)
+    function computeOverallRecommendationSignal(analyses) {
+            const signals = [];
+
+            // RSI-based signal
+            if (analyses.rsi) {
+                const overboughtThreshold = parseInt(document.getElementById('rsiOverbought')?.value) || 70;
+                const oversoldThreshold = parseInt(document.getElementById('rsiOversold')?.value) || 30;
+                const rsiValues = [];
+                Object.keys(analyses.rsi).forEach(k => {
+                    const ku = k.toUpperCase();
+                    if (ku.includes('RSI') || k.startsWith('rsi_')) {
+                        const v = parseFloat(analyses.rsi[k]);
+                        if (!isNaN(v)) rsiValues.push(v);
+                    }
+                });
+                const overboughtCount = rsiValues.filter(v => v >= overboughtThreshold).length;
+                const oversoldCount = rsiValues.filter(v => v <= oversoldThreshold).length;
+                if (oversoldCount > overboughtCount) signals.push('BUY');
+                else if (overboughtCount > oversoldCount) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+
+            // EMA-based signal (9 vs 15)
+            if (analyses.ema) {
+                const ema9 = parseFloat(analyses.ema['EMA9'] ?? analyses.ema['ema_9']);
+                const ema15 = parseFloat(analyses.ema['EMA15'] ?? analyses.ema['ema_15']);
+                if (!isNaN(ema9) && !isNaN(ema15)) {
+                    signals.push(ema9 > ema15 ? 'BUY' : 'SELL');
+                }
+            }
+
+            // DMA-based signal (CMP vs DMAs)
+            if (analyses.dma) {
+                const cmp = parseFloat(analyses.dma['CMP'] ?? analyses.dma['close'] ?? analyses.dma['Close']);
+                let above = 0, below = 0;
+                Object.keys(analyses.dma).forEach(k => {
+                    if (k.toUpperCase().includes('DMA') || k.startsWith('dma_')) {
+                        const v = parseFloat(analyses.dma[k]);
+                        if (!isNaN(cmp) && !isNaN(v)) { if (cmp > v) above++; else if (cmp < v) below++; }
+                    }
+                });
+                if (above > below) signals.push('BUY');
+                else if (below > above) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+
+            const buy = signals.filter(s => s === 'BUY').length;
+            const sell = signals.filter(s => s === 'SELL').length;
+            const hold = signals.filter(s => s === 'HOLD').length;
+
+            if (buy > sell && buy > hold) return { text: 'BUY', type: 'bullish' };
+            if (sell > buy && sell > hold) return { text: 'SELL', type: 'bearish' };
+            return { text: 'HOLD', type: 'neutral' };
+        }
+
+        
+
+        // Generate final recommendation as a card for the 2x2 grid
+        function generateOverallRecommendationCard(analyses) {
+            const signals = [];
+            
+            if (analyses.rsi) {
+                // RSI signal logic
+                const rsiValues = [];
+                Object.keys(analyses.rsi).forEach(key => {
+                    if (key.toUpperCase().includes('RSI')) {
+                        const rsiValue = parseFloat(analyses.rsi[key]);
+                        if (!isNaN(rsiValue)) rsiValues.push(rsiValue);
+                    }
+                });
+                
+                const overboughtThreshold = parseInt(document.getElementById('rsiOverbought').value) || 70;
+                const oversoldThreshold = parseInt(document.getElementById('rsiOversold').value) || 30;
+                const overboughtCount = rsiValues.filter(v => v >= overboughtThreshold).length;
+                const oversoldCount = rsiValues.filter(v => v <= oversoldThreshold).length;
+                
+                if (oversoldCount > overboughtCount) signals.push('BUY');
+                else if (overboughtCount > oversoldCount) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+            
+            if (analyses.ema) {
+                // EMA signal logic
+                const ema9 = parseFloat(analyses.ema['EMA9']);
+                const ema15 = parseFloat(analyses.ema['EMA15']);
+                if (!isNaN(ema9) && !isNaN(ema15)) {
+                    if (ema9 > ema15) signals.push('BUY');
+                    else signals.push('SELL');
+                }
+            }
+            
+            if (analyses.dma) {
+                // DMA signal logic
+                const cmp = parseFloat(analyses.dma['CMP']) || 0;
+                let aboveCount = 0, belowCount = 0;
+                Object.keys(analyses.dma).forEach(key => {
+                    if (key.toUpperCase().includes('DMA')) {
+                        const dmaValue = parseFloat(analyses.dma[key]);
+                        if (!isNaN(dmaValue)) {
+                            if (cmp > dmaValue) aboveCount++;
+                            else belowCount++;
+                        }
+                    }
+                });
+                
+                if (aboveCount > belowCount) signals.push('BUY');
+                else if (belowCount > aboveCount) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+            
+            // Overall consensus
+            const buyCount = signals.filter(s => s === 'BUY').length;
+            const sellCount = signals.filter(s => s === 'SELL').length;
+            const holdCount = signals.filter(s => s === 'HOLD').length;
+            
+            let overallSignal = 'HOLD';
+            let signalType = 'neutral';
+            let consensus = 'Mixed';
+            
+            if (buyCount > sellCount && buyCount > holdCount) {
+                overallSignal = 'BUY';
+                signalType = 'bullish';
+                consensus = buyCount === signals.length ? 'Strong' : 'Moderate';
+            } else if (sellCount > buyCount && sellCount > holdCount) {
+                overallSignal = 'SELL';
+                signalType = 'bearish';
+                consensus = sellCount === signals.length ? 'Strong' : 'Moderate';
+            }
+
+            return `
+                <div class="summary-card final-recommendation-card" style="background: linear-gradient(135deg, ${signalType === 'bullish' ? 'rgba(40, 167, 69, 0.1)' : signalType === 'bearish' ? 'rgba(220, 53, 69, 0.1)' : 'rgba(108, 117, 125, 0.1)'} 0%, var(--bg-primary) 100%); border: 2px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="summary-header">
+                        <i class="fas fa-bullseye" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        Final Recommendation
+                    </div>
+                    
+                    <div class="final-recommendation-content">
+                        <div style="font-size: 2rem; margin-bottom: 1rem;">
+                            <i class="fas fa-${signalType === 'bullish' ? 'thumbs-up' : signalType === 'bearish' ? 'thumbs-down' : 'hand-paper'}" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        </div>
+                        
+                        <h3 style="margin: 0 0 0.5rem 0; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'}; font-size: 1.5rem;">
+                            <strong>${overallSignal}</strong>
+                        </h3>
+                        
+                        <div style="font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
+                            <strong>${consensus} Consensus</strong>
+                        </div>
+                        
+                        <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                            ${buyCount} Buy • ${sellCount} Sell • ${holdCount} Hold
+                        </div>
+                        
+                        <div style="font-size: 1.1rem; font-weight: bold; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'}; padding: 0.5rem; background: var(--bg-secondary); border-radius: 4px;">
+                            ${overallSignal === 'BUY' ? '🎯 EXECUTE LONG' : 
+                              overallSignal === 'SELL' ? '🎯 EXECUTE SHORT' : 
+                              '🎯 WAIT & WATCH'}
+                        </div>
+                        
+                        <div style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-secondary);">
+                            Always use proper risk management
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate RSI Analysis Table
+        function generateRSIAnalysisTable(rsiData) {
+            const overboughtThreshold = parseInt(document.getElementById('rsiOverbought').value) || 70;
+            const oversoldThreshold = parseInt(document.getElementById('rsiOversold').value) || 30;
+            
+            let rsiRows = [];
+            let buySignals = 0;
+            let sellSignals = 0;
+            let holdSignals = 0;
+            
+            Object.keys(rsiData).forEach(key => {
+                if (key.toUpperCase().includes('RSI')) {
+                    const rsiValue = parseFloat(rsiData[key]);
+                    if (!isNaN(rsiValue)) {
+                        let signal = '';
+                        let signalClass = 'neutral';
+                        let recommendation = '';
+                        
+                        if (rsiValue >= overboughtThreshold) {
+                            signal = 'SELL';
+                            signalClass = 'bearish';
+                            recommendation = 'Overbought - Consider selling';
+                            sellSignals++;
+                        } else if (rsiValue <= oversoldThreshold) {
+                            signal = 'BUY';
+                            signalClass = 'bullish';
+                            recommendation = 'Oversold - Consider buying';
+                            buySignals++;
+                        } else {
+                            signal = 'HOLD';
+                            signalClass = 'neutral';
+                            recommendation = 'Neutral - Wait for signal';
+                            holdSignals++;
+                        }
+
+                        rsiRows.push({
+                            indicator: key,
+                            value: rsiValue.toFixed(2),
+                            signal: signal,
+                            signalClass: signalClass,
+                            recommendation: recommendation
+                        });
+                    }
+                }
+            });
+
+            // Determine overall RSI signal
+            let overallSignal = 'Wait for Clear Signal';
+            let signalType = 'neutral';
+            
+            if (buySignals > sellSignals && buySignals > holdSignals) {
+                overallSignal = buySignals === rsiRows.length ? 'Strong Buy Signal' : 'Bullish Momentum';
+                signalType = 'bullish';
+            } else if (sellSignals > buySignals && sellSignals > holdSignals) {
+                overallSignal = sellSignals === rsiRows.length ? 'Strong Sell Signal' : 'Bearish Pressure';
+                signalType = 'bearish';
+            } else {
+                overallSignal = 'Mixed RSI Signals';
+                signalType = 'neutral';
+            }
+
+            return `
+                <div class="summary-card" style="border-left: 4px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="summary-header">
+                        <i class="fas fa-chart-line" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        RSI Analysis
+                    </div>
+                    
+                    <div style="text-align: center; margin: 1rem 0; padding: 0.75rem; background: ${signalType === 'bullish' ? 'rgba(40, 167, 69, 0.1)' : signalType === 'bearish' ? 'rgba(220, 53, 69, 0.1)' : 'rgba(108, 117, 125, 0.1)'}; border-radius: 6px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                            <i class="fas fa-${signalType === 'bullish' ? 'arrow-up' : signalType === 'bearish' ? 'arrow-down' : 'minus'}"></i> ${overallSignal}
+                        </div>
+                        <div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                            ${buySignals} Buy • ${sellSignals} Sell • ${holdSignals} Hold
+                        </div>
+                    </div>
+                    
+                    <div class="table-container analysis-table" style="margin-top: 1rem;">
+                        <table class="table" style="margin-bottom: 0;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 25%;">Indicator</th>
+                                    <th style="width: 20%;">Value</th>
+                                    <th style="width: 20%;">Signal</th>
+                                    <th style="width: 35%;">Recommendation</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rsiRows.map(row => `
+                                    <tr>
+                                        <td>${row.indicator}</td>
+                                        <td><strong>${row.value}</strong></td>
+                                        <td>
+                                            <span class="signal-item ${row.signalClass}">
+                                                <i class="fas fa-${row.signalClass === 'bullish' ? 'arrow-up' : row.signalClass === 'bearish' ? 'arrow-down' : 'minus'}" style="margin-right: 0.25rem; font-size: 0.7rem;"></i>
+                                                ${row.signal}
+                                            </span>
+                                        </td>
+                                        <td>${row.recommendation}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate EMA Analysis Table
+        function generateEMAAnalysisTable(emaData) {
+            const emaValues = {};
+            Object.keys(emaData).forEach(key => {
+                if (key.toUpperCase().includes('EMA')) {
+                    const emaValue = parseFloat(emaData[key]);
+                    if (!isNaN(emaValue)) {
+                        emaValues[key] = emaValue;
+                    }
+                }
+            });
+
+            const ema9Value = emaValues['EMA9'];
+            const ema15Value = emaValues['EMA15'];
+            const cmp = parseFloat(emaData['CMP']) || 0;
+            
+            let emaRows = [];
+            let buySignals = 0;
+            let sellSignals = 0;
+            
+            Object.keys(emaValues).forEach(key => {
+                let signal = 'HOLD';
+                let signalClass = 'neutral';
+                let recommendation = '';
+                
+                if (key === 'EMA9' && ema9Value && ema15Value) {
+                    if (ema9Value > ema15Value) {
+                        signal = 'BUY';
+                        signalClass = 'bullish';
+                        recommendation = 'Above EMA15 - Bullish crossover';
+                        buySignals++;
+                    } else {
+                        signal = 'SELL';
+                        signalClass = 'bearish';
+                        recommendation = 'Below EMA15 - Bearish crossover';
+                        sellSignals++;
+                    }
+                } else {
+                    if (cmp > emaValues[key]) {
+                        signal = 'BUY';
+                        signalClass = 'bullish';
+                        recommendation = 'Price above EMA - Acting as support';
+                        buySignals++;
+                    } else {
+                        signal = 'SELL';
+                        signalClass = 'bearish';
+                        recommendation = 'Price below EMA - Acting as resistance';
+                        sellSignals++;
+                    }
+                }
+
+                emaRows.push({
+                    indicator: key,
+                    value: emaValues[key].toFixed(2),
+                    signal: signal,
+                    signalClass: signalClass,
+                    recommendation: recommendation
+                });
+            });
+
+            // Determine overall EMA signal
+            let overallSignal = 'Sideways Movement';
+            let signalType = 'neutral';
+            
+            if (buySignals > sellSignals) {
+                overallSignal = buySignals === emaRows.length ? 'Strong Bullish Momentum' : 'Bullish Momentum';
+                signalType = 'bullish';
+            } else if (sellSignals > buySignals) {
+                overallSignal = sellSignals === emaRows.length ? 'Strong Bearish Momentum' : 'Bearish Momentum';
+                signalType = 'bearish';
+            } else {
+                overallSignal = 'Mixed EMA Signals';
+                signalType = 'neutral';
+            }
+
+            return `
+                <div class="summary-card" style="border-left: 4px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="summary-header">
+                        <i class="fas fa-exchange-alt" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        EMA Analysis
+                    </div>
+                    
+                    <div style="text-align: center; margin: 1rem 0; padding: 0.75rem; background: ${signalType === 'bullish' ? 'rgba(40, 167, 69, 0.1)' : signalType === 'bearish' ? 'rgba(220, 53, 69, 0.1)' : 'rgba(108, 117, 125, 0.1)'}; border-radius: 6px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                            <i class="fas fa-${signalType === 'bullish' ? 'trending-up' : signalType === 'bearish' ? 'trending-down' : 'minus'}"></i> ${overallSignal}
+                        </div>
+                        <div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                            ${buySignals} Bullish • ${sellSignals} Bearish
+                        </div>
+                    </div>
+                    
+                    <div class="table-container analysis-table" style="margin-top: 1rem;">
+                        <table class="table" style="margin-bottom: 0;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 25%;">Indicator</th>
+                                    <th style="width: 20%;">Value</th>
+                                    <th style="width: 20%;">Signal</th>
+                                    <th style="width: 35%;">Recommendation</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${emaRows.map(row => `
+                                    <tr>
+                                        <td>${row.indicator}</td>
+                                        <td><strong>${row.value}</strong></td>
+                                        <td>
+                                            <span class="signal-item ${row.signalClass}">
+                                                <i class="fas fa-${row.signalClass === 'bullish' ? 'arrow-up' : row.signalClass === 'bearish' ? 'arrow-down' : 'minus'}" style="margin-right: 0.25rem; font-size: 0.7rem;"></i>
+                                                ${row.signal}
+                                            </span>
+                                        </td>
+                                        <td>${row.recommendation}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate DMA Analysis Table
+        function generateDMAAnalysisTable(dmaData) {
+            const cmp = parseFloat(dmaData['CMP']) || 0;
+            
+            let dmaRows = [];
+            let aboveCount = 0;
+            let belowCount = 0;
+            
+            Object.keys(dmaData).forEach(key => {
+                if (key.toUpperCase().includes('DMA')) {
+                    const dmaValue = parseFloat(dmaData[key]);
+                    if (!isNaN(dmaValue) && cmp > 0) {
+                        const percentDiff = ((cmp - dmaValue) / dmaValue) * 100;
+                        
+                        let signal = '';
+                        let signalClass = 'neutral';
+                        let recommendation = '';
+                        
+                        if (cmp > dmaValue) {
+                            signal = 'BUY';
+                            signalClass = 'bullish';
+                            recommendation = 'Above DMA - Acting as support level';
+                            aboveCount++;
+                        } else {
+                            signal = 'SELL';
+                            signalClass = 'bearish';
+                            recommendation = 'Below DMA - Acting as resistance level';
+                            belowCount++;
+                        }
+
+                        dmaRows.push({
+                            indicator: key,
+                            value: dmaValue.toFixed(2) + ' (' + (percentDiff > 0 ? '+' : '') + percentDiff.toFixed(2) + '%)',
+                            signal: signal,
+                            signalClass: signalClass,
+                            recommendation: recommendation
+                        });
+                    }
+                }
+            });
+
+            // Determine overall DMA signal
+            let overallSignal = 'Mixed Levels';
+            let signalType = 'neutral';
+            
+            if (aboveCount > belowCount) {
+                overallSignal = aboveCount === dmaRows.length ? 'Strong Support Levels' : 'Mostly Supported';
+                signalType = 'bullish';
+            } else if (belowCount > aboveCount) {
+                overallSignal = belowCount === dmaRows.length ? 'Facing Strong Resistance' : 'Mostly Resistance';
+                signalType = 'bearish';
+            } else {
+                overallSignal = 'Mixed Support/Resistance';
+                signalType = 'neutral';
+            }
+
+            return `
+                <div class="summary-card" style="border-left: 4px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="summary-header">
+                        <i class="fas fa-chart-bar" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        DMA Analysis
+                    </div>
+                    
+                    <div style="text-align: center; margin: 1rem 0; padding: 0.75rem; background: ${signalType === 'bullish' ? 'rgba(40, 167, 69, 0.1)' : signalType === 'bearish' ? 'rgba(220, 53, 69, 0.1)' : 'rgba(108, 117, 125, 0.1)'}; border-radius: 6px;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                            <i class="fas fa-${signalType === 'bullish' ? 'shield-alt' : signalType === 'bearish' ? 'exclamation-triangle' : 'balance-scale'}"></i> ${overallSignal}
+                        </div>
+                        <div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                            ${aboveCount} Above • ${belowCount} Below DMA
+                        </div>
+                    </div>
+                    
+                    <div class="table-container analysis-table" style="margin-top: 1rem;">
+                        <table class="table" style="margin-bottom: 0;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 25%;">Indicator</th>
+                                    <th style="width: 30%;">Value (% Diff)</th>
+                                    <th style="width: 20%;">Signal</th>
+                                    <th style="width: 25%;">Level Type</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${dmaRows.map(row => `
+                                    <tr>
+                                        <td>${row.indicator}</td>
+                                        <td><strong>${row.value}</strong></td>
+                                        <td>
+                                            <span class="signal-item ${row.signalClass}">
+                                                <i class="fas fa-${row.signalClass === 'bullish' ? 'arrow-up' : 'arrow-down'}" style="margin-right: 0.25rem; font-size: 0.7rem;"></i>
+                                                ${row.signal}
+                                            </span>
+                                        </td>
+                                        <td>${row.recommendation.includes('support') ? 'Support' : 'Resistance'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate analysis table showing all indicators
+        function generateAnalysisTable(analyses) {
+            const overboughtThreshold = parseInt(document.getElementById('rsiOverbought').value) || 70;
+            const oversoldThreshold = parseInt(document.getElementById('rsiOversold').value) || 30;
+            
+            let tableRows = [];
+            
+            // RSI Analysis Rows
+            if (analyses.rsi) {
+                Object.keys(analyses.rsi).forEach(key => {
+                    if (key.toUpperCase().includes('RSI')) {
+                        const rsiValue = parseFloat(analyses.rsi[key]);
+                        if (!isNaN(rsiValue)) {
+                            let signal = '';
+                            let signalClass = 'neutral';
+                            let recommendation = '';
+                            
+                            if (rsiValue >= overboughtThreshold) {
+                                signal = 'SELL';
+                                signalClass = 'bearish';
+                                recommendation = 'Overbought - Consider selling';
+                            } else if (rsiValue <= oversoldThreshold) {
+                                signal = 'BUY';
+                                signalClass = 'bullish';
+                                recommendation = 'Oversold - Consider buying';
+                            } else {
+                                signal = 'HOLD';
+                                signalClass = 'neutral';
+                                recommendation = 'Neutral zone - Wait';
+                            }
+
+                            tableRows.push({
+                                category: 'RSI',
+                                indicator: key,
+                                value: rsiValue.toFixed(2),
+                                signal: signal,
+                                signalClass: signalClass,
+                                recommendation: recommendation
+                            });
+                        }
+                    }
+                });
+            }
+            
+            // EMA Analysis Rows
+            if (analyses.ema) {
+                const emaValues = {};
+                Object.keys(analyses.ema).forEach(key => {
+                    if (key.toUpperCase().includes('EMA')) {
+                        const emaValue = parseFloat(analyses.ema[key]);
+                        if (!isNaN(emaValue)) {
+                            emaValues[key] = emaValue;
+                        }
+                    }
+                });
+
+                const ema9Value = emaValues['EMA9'];
+                const ema15Value = emaValues['EMA15'];
+                const cmp = parseFloat(analyses.ema['CMP']) || 0;
+                
+                Object.keys(emaValues).forEach(key => {
+                    let signal = 'HOLD';
+                    let signalClass = 'neutral';
+                    let recommendation = '';
+                    
+                    if (key === 'EMA9' && ema9Value && ema15Value) {
+                        if (ema9Value > ema15Value) {
+                            signal = 'BUY';
+                            signalClass = 'bullish';
+                            recommendation = 'Above EMA15 - Bullish trend';
+                        } else {
+                            signal = 'SELL';
+                            signalClass = 'bearish';
+                            recommendation = 'Below EMA15 - Bearish trend';
+                        }
+                    } else {
+                        if (cmp > emaValues[key]) {
+                            signal = 'BUY';
+                            signalClass = 'bullish';
+                            recommendation = 'Price above EMA - Support';
+                        } else {
+                            signal = 'SELL';
+                            signalClass = 'bearish';
+                            recommendation = 'Price below EMA - Resistance';
+                        }
+                    }
+
+                    tableRows.push({
+                        category: 'EMA',
+                        indicator: key,
+                        value: emaValues[key].toFixed(2),
+                        signal: signal,
+                        signalClass: signalClass,
+                        recommendation: recommendation
+                    });
+                });
+            }
+            
+            // DMA Analysis Rows
+            if (analyses.dma) {
+                const cmp = parseFloat(analyses.dma['CMP']) || 0;
+                
+                Object.keys(analyses.dma).forEach(key => {
+                    if (key.toUpperCase().includes('DMA')) {
+                        const dmaValue = parseFloat(analyses.dma[key]);
+                        if (!isNaN(dmaValue) && cmp > 0) {
+                            const percentDiff = ((cmp - dmaValue) / dmaValue) * 100;
+                            
+                            let signal = '';
+                            let signalClass = 'neutral';
+                            let recommendation = '';
+                            
+                            if (cmp > dmaValue) {
+                                signal = 'BUY';
+                                signalClass = 'bullish';
+                                recommendation = 'Above DMA - Support level';
+                            } else {
+                                signal = 'SELL';
+                                signalClass = 'bearish';
+                                recommendation = 'Below DMA - Resistance level';
+                            }
+
+                            tableRows.push({
+                                category: 'DMA',
+                                indicator: key,
+                                value: dmaValue.toFixed(2) + ' (' + (percentDiff > 0 ? '+' : '') + percentDiff.toFixed(2) + '%)',
+                                signal: signal,
+                                signalClass: signalClass,
+                                recommendation: recommendation
+                            });
+                        }
+                    }
+                });
+            }
+
+            if (tableRows.length === 0) {
+                return '<div class="text-center" style="padding: 2rem;">No analysis data available</div>';
+            }
+
+            return `
+                <div class="summary-card">
+                    <div class="summary-header">
+                        <i class="fas fa-table"></i>
+                        Technical Analysis Summary
+                    </div>
+                    
+                    <div class="table-container analysis-table" style="margin-top: 1rem;">
+                        <table class="table" style="margin-bottom: 0;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 12%;">Category</th>
+                                    <th style="width: 18%;">Indicator</th>
+                                    <th style="width: 20%;">Current Value</th>
+                                    <th style="width: 15%;">Signal</th>
+                                    <th style="width: 35%;">Recommendation</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableRows.map(row => `
+                                    <tr>
+                                        <td>${row.category}</td>
+                                        <td>${row.indicator}</td>
+                                        <td>${row.value}</td>
+                                        <td>
+                                            <span class="signal-item ${row.signalClass}">
+                                                <i class="fas fa-${row.signalClass === 'bullish' ? 'arrow-up' : row.signalClass === 'bearish' ? 'arrow-down' : 'minus'}" style="margin-right: 0.25rem; font-size: 0.7rem;"></i>
+                                                ${row.signal}
+                                            </span>
+                                        </td>
+                                        <td>${row.recommendation}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate professional RSI analysis using exact table values
+        function generateProfessionalRSIAnalysis(latestData) {
+            const symbol = latestData['Symbol'] || 'N/A';
+            const cmp = parseFloat(latestData['CMP']) || 0;
+            const overboughtThreshold = parseInt(document.getElementById('rsiOverbought').value) || 70;
+            const oversoldThreshold = parseInt(document.getElementById('rsiOversold').value) || 30;
+
+            let signals = [];
+            let overallSignal = 'HOLD';
+            let signalType = 'neutral';
+
+            // Use exact RSI values from table data
+            Object.keys(latestData).forEach(key => {
+                if (key.toUpperCase().includes('RSI')) {
+                    const rsiValue = parseFloat(latestData[key]);
+                    if (!isNaN(rsiValue)) {
+                        let signal = '';
+                        let type = 'neutral';
+                        
+                        if (rsiValue >= overboughtThreshold) {
+                            signal = 'SELL';
+                            type = 'bearish';
+                        } else if (rsiValue <= oversoldThreshold) {
+                            signal = 'BUY';
+                            type = 'bullish';
+                        } else {
+                            signal = 'HOLD';
+                            type = 'neutral';
+                        }
+
+                        signals.push({
+                            indicator: key,
+                            value: rsiValue,
+                            signal: signal,
+                            type: type
+                        });
+                    }
+                }
+            });
+
+            // Determine overall signal
+            const buySignals = signals.filter(s => s.signal === 'BUY').length;
+            const sellSignals = signals.filter(s => s.signal === 'SELL').length;
+            
+            if (buySignals > sellSignals) {
+                overallSignal = 'BUY';
+                signalType = 'bullish';
+            } else if (sellSignals > buySignals) {
+                overallSignal = 'SELL';
+                signalType = 'bearish';
+            }
+
+            return `
+                <div class="summary-card" style="border-left: 4px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="summary-header">
+                        <i class="fas fa-chart-line" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        RSI Analysis
+                    </div>
+                    
+                    <div class="signal-item ${signalType}" style="margin-bottom: 1rem; font-size: 1.1rem; justify-content: center;">
+                        <i class="fas fa-${signalType === 'bullish' ? 'arrow-up' : signalType === 'bearish' ? 'arrow-down' : 'minus'} signal-icon"></i>
+                        <div class="signal-text"><strong>${overallSignal} SIGNAL</strong></div>
+                    </div>
+
+                    <div class="signal-grid">
+                        ${signals.map(signal => `
+                            <div class="signal-item ${signal.type}">
+                                <i class="fas fa-circle signal-icon" style="font-size: 0.5rem;"></i>
+                                <div>
+                                    <div class="signal-text">${signal.indicator}</div>
+                                    <div class="signal-value">${signal.value.toFixed(2)} → ${signal.signal}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.9rem; text-align: center;">
+                        <strong style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : 'var(--text-secondary)'};">
+                            ${overallSignal === 'BUY' ? '📈 Consider Long Position' : 
+                              overallSignal === 'SELL' ? '📉 Consider Short Position' : 
+                              '⏸️ Wait for Clear Signal'}
+                        </strong>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate professional EMA analysis using exact table values
+        function generateProfessionalEMAAnalysis(latestData) {
+            const symbol = latestData['Symbol'] || 'N/A';
+            const cmp = parseFloat(latestData['CMP']) || 0;
+
+            // Use exact EMA values from table data
+            const emaValues = {};
+            Object.keys(latestData).forEach(key => {
+                if (key.toUpperCase().includes('EMA')) {
+                    const emaValue = parseFloat(latestData[key]);
+                    if (!isNaN(emaValue)) {
+                        emaValues[key] = emaValue;
+                    }
+                }
+            });
+
+            const ema9Value = emaValues['EMA9'];
+            const ema15Value = emaValues['EMA15'];
+            
+            let overallSignal = 'HOLD';
+            let signalType = 'neutral';
+            
+            if (ema9Value && ema15Value) {
+                if (ema9Value > ema15Value) {
+                    overallSignal = 'BUY';
+                    signalType = 'bullish';
+                } else {
+                    overallSignal = 'SELL';
+                    signalType = 'bearish';
+                }
+            }
+
+            const priceTrend = ema9Value && cmp > ema9Value ? 'above' : ema9Value && cmp < ema9Value ? 'below' : 'at';
+            
+            return `
+                <div class="summary-card" style="border-left: 4px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="summary-header">
+                        <i class="fas fa-exchange-alt" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        EMA Crossover Analysis
+                    </div>
+                    
+                    <div class="signal-item ${signalType}" style="margin-bottom: 1rem; font-size: 1.1rem; justify-content: center;">
+                        <i class="fas fa-${signalType === 'bullish' ? 'trending-up' : signalType === 'bearish' ? 'trending-down' : 'minus'} signal-icon"></i>
+                        <div class="signal-text"><strong>${overallSignal} SIGNAL</strong></div>
+                    </div>
+
+                    <div class="signal-grid">
+                        ${Object.keys(emaValues).map(key => `
+                            <div class="signal-item ${signalType}">
+                                <i class="fas fa-circle signal-icon" style="font-size: 0.5rem;"></i>
+                                <div>
+                                    <div class="signal-text">${key}</div>
+                                    <div class="signal-value">${emaValues[key].toFixed(2)}</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                        
+                        ${ema9Value ? `
+                            <div class="signal-item ${cmp > ema9Value ? 'bullish' : cmp < ema9Value ? 'bearish' : 'neutral'}" style="grid-column: 1 / -1;">
+                                <i class="fas fa-${cmp > ema9Value ? 'arrow-up' : cmp < ema9Value ? 'arrow-down' : 'minus'} signal-icon"></i>
+                                <div class="signal-text">Price is <strong>${priceTrend}</strong> EMA9</div>
+                            </div>
+                        ` : ''}
+                    </div>
+
+                    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.9rem; text-align: center;">
+                        <strong style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : 'var(--text-secondary)'};">
+                            ${overallSignal === 'BUY' ? '🚀 Bullish Momentum' : 
+                              overallSignal === 'SELL' ? '⬇️ Bearish Momentum' : 
+                              '➡️ Sideways Movement'}
+                        </strong>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate professional DMA analysis using exact table values
+        function generateProfessionalDMAAnalysis(latestData) {
+            const symbol = latestData['Symbol'] || 'N/A';
+            const cmp = parseFloat(latestData['CMP']) || 0;
+
+            // Use exact DMA values from table data
+            let dmaSignals = [];
+            
+            Object.keys(latestData).forEach(key => {
+                if (key.toUpperCase().includes('DMA')) {
+                    const dmaValue = parseFloat(latestData[key]);
+                    if (!isNaN(dmaValue) && cmp > 0) {
+                        const difference = cmp - dmaValue;
+                        const percentDiff = (difference / dmaValue) * 100;
+                        
+                        let signal = '';
+                        let type = 'neutral';
+                        
+                        if (cmp > dmaValue) {
+                            signal = 'SUPPORT';
+                            type = 'bullish';
+                        } else {
+                            signal = 'RESISTANCE';
+                            type = 'bearish';
+                        }
+
+                        dmaSignals.push({
+                            indicator: key,
+                            value: dmaValue,
+                            percentDiff: percentDiff,
+                            signal: signal,
+                            type: type
+                        });
+                    }
+                }
+            });
+
+            // Determine overall signal
+            const supportSignals = dmaSignals.filter(s => s.type === 'bullish').length;
+            const resistanceSignals = dmaSignals.filter(s => s.type === 'bearish').length;
+            
+            let overallSignal = 'HOLD';
+            let signalType = 'neutral';
+            
+            if (supportSignals > resistanceSignals) {
+                overallSignal = 'BUY';
+                signalType = 'bullish';
+            } else if (resistanceSignals > supportSignals) {
+                overallSignal = 'SELL';
+                signalType = 'bearish';
+            }
+
+            return `
+                <div class="summary-card" style="border-left: 4px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="summary-header">
+                        <i class="fas fa-chart-bar" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};"></i>
+                        DMA Support/Resistance
+                    </div>
+                    
+                    <div class="signal-item ${signalType}" style="margin-bottom: 1rem; font-size: 1.1rem; justify-content: center;">
+                        <i class="fas fa-${signalType === 'bullish' ? 'shield-alt' : signalType === 'bearish' ? 'exclamation-triangle' : 'minus'} signal-icon"></i>
+                        <div class="signal-text"><strong>${overallSignal} SIGNAL</strong></div>
+                    </div>
+
+                    <div class="signal-grid">
+                        ${dmaSignals.map(signal => `
+                            <div class="signal-item ${signal.type}">
+                                <i class="fas fa-circle signal-icon" style="font-size: 0.5rem;"></i>
+                                <div>
+                                    <div class="signal-text">${signal.indicator}</div>
+                                    <div class="signal-value">${signal.value.toFixed(2)} (${signal.percentDiff > 0 ? '+' : ''}${signal.percentDiff.toFixed(2)}%)</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.9rem; text-align: center;">
+                        <strong style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : 'var(--text-secondary)'};">
+                            ${overallSignal === 'BUY' ? '🛡️ Strong Support Levels' : 
+                              overallSignal === 'SELL' ? '🚧 Facing Resistance' : 
+                              '⚖️ Mixed Levels'}
+                        </strong>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate overall recommendation
+        function generateOverallRecommendation(analyses) {
+            const signals = [];
+            
+            if (analyses.rsi) {
+                // RSI signal logic
+                const rsiValues = [];
+                Object.keys(analyses.rsi).forEach(key => {
+                    if (key.toUpperCase().includes('RSI')) {
+                        const rsiValue = parseFloat(analyses.rsi[key]);
+                        if (!isNaN(rsiValue)) rsiValues.push(rsiValue);
+                    }
+                });
+                
+                const overboughtThreshold = parseInt(document.getElementById('rsiOverbought').value) || 70;
+                const oversoldThreshold = parseInt(document.getElementById('rsiOversold').value) || 30;
+                const overboughtCount = rsiValues.filter(v => v >= overboughtThreshold).length;
+                const oversoldCount = rsiValues.filter(v => v <= oversoldThreshold).length;
+                
+                if (oversoldCount > overboughtCount) signals.push('BUY');
+                else if (overboughtCount > oversoldCount) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+            
+            if (analyses.ema) {
+                // EMA signal logic
+                const ema9 = parseFloat(analyses.ema['EMA9']);
+                const ema15 = parseFloat(analyses.ema['EMA15']);
+                if (!isNaN(ema9) && !isNaN(ema15)) {
+                    if (ema9 > ema15) signals.push('BUY');
+                    else signals.push('SELL');
+                }
+            }
+            
+            if (analyses.dma) {
+                // DMA signal logic
+                const cmp = parseFloat(analyses.dma['CMP']) || 0;
+                let aboveCount = 0, belowCount = 0;
+                Object.keys(analyses.dma).forEach(key => {
+                    if (key.toUpperCase().includes('DMA')) {
+                        const dmaValue = parseFloat(analyses.dma[key]);
+                        if (!isNaN(dmaValue)) {
+                            if (cmp > dmaValue) aboveCount++;
+                            else belowCount++;
+                        }
+                    }
+                });
+                
+                if (aboveCount > belowCount) signals.push('BUY');
+                else if (belowCount > aboveCount) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+            
+            // Overall consensus
+            const buyCount = signals.filter(s => s === 'BUY').length;
+            const sellCount = signals.filter(s => s === 'SELL').length;
+            const holdCount = signals.filter(s => s === 'HOLD').length;
+            
+            let overallSignal = 'HOLD';
+            let signalType = 'neutral';
+            let consensus = 'Mixed';
+            
+            if (buyCount > sellCount && buyCount > holdCount) {
+                overallSignal = 'BUY';
+                signalType = 'bullish';
+                consensus = buyCount === signals.length ? 'Strong' : 'Moderate';
+            } else if (sellCount > buyCount && sellCount > holdCount) {
+                overallSignal = 'SELL';
+                signalType = 'bearish';
+                consensus = sellCount === signals.length ? 'Strong' : 'Moderate';
+            }
+
+            const symbol = analyses.rsi?.['Symbol'] || analyses.ema?.['Symbol'] || analyses.dma?.['Symbol'] || 'N/A';
+            
+            return `
+                <div class="summary-card" style="background: linear-gradient(135deg, ${signalType === 'bullish' ? 'rgba(40, 167, 69, 0.1)' : signalType === 'bearish' ? 'rgba(220, 53, 69, 0.1)' : 'rgba(108, 117, 125, 0.1)'} 0%, var(--bg-primary) 100%); border: 2px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'}; margin-top: 1rem;">
+                    <div style="text-align: center; padding: 1.5rem;">
+                        <h3 style="margin: 0 0 1rem 0; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                            <i class="fas fa-${signalType === 'bullish' ? 'thumbs-up' : signalType === 'bearish' ? 'thumbs-down' : 'hand-paper'}"></i>
+                            Final Recommendation: <strong>${overallSignal}</strong>
+                        </h3>
+                        
+                        <div style="font-size: 1.1rem; margin-bottom: 1rem;">
+                            <strong style="color: var(--text-primary);">${consensus} Consensus</strong> 
+                            <span style="color: var(--text-secondary);">(${buyCount} Buy, ${sellCount} Sell, ${holdCount} Hold)</span>
+                        </div>
+                        
+                        <div style="font-size: 1.3rem; font-weight: bold; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                            ${overallSignal === 'BUY' ? '🎯 EXECUTE LONG POSITION' : 
+                              overallSignal === 'SELL' ? '🎯 EXECUTE SHORT POSITION' : 
+                              '🎯 WAIT FOR CONFIRMATION'}
+                        </div>
+                        
+                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); font-size: 0.9rem; color: var(--text-secondary);">
+                            Risk Management: Always use stop-loss and position sizing appropriate for your risk tolerance.
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Sort table by column (disabled for now)
+        function sortTable(column) {
+            // Sorting UI disabled - will work on this later
+            console.log('Table sorting UI disabled - working on it later');
+            return;
+            
+            // Only allow sorting for Time column
+            if (column !== 'Time') {
+                console.log('Sorting disabled for non-Time columns');
+                return;
+            }
+            
+            if (currentSortColumn === column) {
+                // Toggle sort direction if same column
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                // New column, default to descending for Time
+                currentSortColumn = column;
+                currentSortDirection = 'desc';
+            }
+
+            // Update sort icons
+            updateSortIcons();
+
+            // Re-render table with new sort
+            const output = scannerOutputs[currentScanner];
+            if (output && output.trim()) {
+                const tableData = parseScannerOutput(output);
+                if (tableData && tableData.length > 0) {
+                    renderTable(tableData);
+                }
+            }
+        }
+
+        // Update sort icons in headers (disabled for now)
+        function updateSortIcons() {
+            // Sort icons disabled for now - will work on sorting UI later
+            // The default descending sort icon is shown in HTML
+            console.log('Sort icons update disabled - will improve sorting UI later');
+            return;
+            
+            // Reset all sort icons
+            document.querySelectorAll('th span').forEach(icon => {
+                icon.innerHTML = '';
+            });
+
+            // Set active sort icon (simplified)
+            const activeHeader = document.getElementById(currentSortColumn.toLowerCase() + 'Header') || 
+                               document.querySelector(`[onclick="sortTable('${currentSortColumn}')"]`);
+            if (activeHeader) {
+                const icon = activeHeader.querySelector('span');
+                if (icon) {
+                    icon.innerHTML = currentSortDirection === 'asc' ? ' ↑' : ' ↓';
+                }
+            }
+        }
+
+        // Update current date and time display
+        function updateDateTime() {
+            const now = new Date();
+            const options = {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            };
+            const dateTimeString = now.toLocaleDateString('en-US', options);
+            document.getElementById('currentDateTime').textContent = dateTimeString;
+        }
+
+        // Generate horizontal final recommendation card (full width)
+        function generateOverallRecommendationCardHorizontal(analyses) {
+            const signals = [];
+            
+            if (analyses.rsi) {
+                // RSI signal logic  
+                const rsiValues = [];
+                Object.keys(analyses.rsi).forEach(key => {
+                    if (key.toUpperCase().includes('RSI')) {
+                        const rsiValue = parseFloat(analyses.rsi[key]);
+                        if (!isNaN(rsiValue)) rsiValues.push(rsiValue);
+                    }
+                });
+                
+                const overboughtThreshold = parseInt(document.getElementById('rsiOverbought').value) || 70;
+                const oversoldThreshold = parseInt(document.getElementById('rsiOversold').value) || 30;
+                const overboughtCount = rsiValues.filter(v => v >= overboughtThreshold).length;
+                const oversoldCount = rsiValues.filter(v => v <= oversoldThreshold).length;
+                
+                if (oversoldCount > overboughtCount) signals.push('BUY');
+                else if (overboughtCount > oversoldCount) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+            
+            if (analyses.ema) {
+                // EMA signal logic
+                const ema9 = parseFloat(analyses.ema['EMA9']);
+                const ema15 = parseFloat(analyses.ema['EMA15']);
+                if (!isNaN(ema9) && !isNaN(ema15)) {
+                    if (ema9 > ema15) signals.push('BUY');
+                    else signals.push('SELL');
+                }
+            }
+            
+            if (analyses.dma) {
+                // DMA signal logic
+                const cmp = parseFloat(analyses.dma['CMP']) || 0;
+                let aboveCount = 0, belowCount = 0;
+                Object.keys(analyses.dma).forEach(key => {
+                    if (key.toUpperCase().includes('DMA')) {
+                        const dmaValue = parseFloat(analyses.dma[key]);
+                        if (!isNaN(dmaValue)) {
+                            if (cmp > dmaValue) aboveCount++;
+                            else belowCount++;
+                        }
+                    }
+                });
+                
+                if (aboveCount > belowCount) signals.push('BUY');
+                else if (belowCount > aboveCount) signals.push('SELL');
+                else signals.push('HOLD');
+            }
+            
+            // Overall consensus
+            const buyCount = signals.filter(s => s === 'BUY').length;
+            const sellCount = signals.filter(s => s === 'SELL').length;
+            const holdCount = signals.filter(s => s === 'HOLD').length;
+            
+            let overallSignal = 'HOLD';
+            let signalType = 'neutral';
+            let consensus = 'Mixed';
+            
+            if (buyCount > sellCount && buyCount > holdCount) {
+                overallSignal = 'BUY';
+                signalType = 'bullish';
+                consensus = buyCount === signals.length ? 'Strong' : 'Moderate';
+            } else if (sellCount > buyCount && sellCount > holdCount) {
+                overallSignal = 'SELL';
+                signalType = 'bearish';
+                consensus = sellCount === signals.length ? 'Strong' : 'Moderate';
+            }
+
+            return `
+                <div class="summary-card final-recommendation-horizontal" style="padding: 0.5rem;background: linear-gradient(135deg, ${signalType === 'bullish' ? 'rgba(40, 167, 69, 0.1)' : signalType === 'bearish' ? 'rgba(220, 53, 69, 0.1)' : 'rgba(108, 117, 125, 0.1)'} 0%, var(--bg-primary) 100%); border: 2px solid ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                    <div class="final-recommendation-horizontal-content">
+                        <div class="recommendation-icon">
+                            <i class="fas fa-bullseye" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'}; font-size: 2rem;"></i>
+                        </div>
+                        <div class="recommendation-main">
+                            <h3 style="margin: 0; color: var(--text-primary); font-size: 1.2rem;">
+                                <i class="fas fa-${signalType === 'bullish' ? 'thumbs-up' : signalType === 'bearish' ? 'thumbs-down' : 'hand-paper'}" style="color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'}; margin-right: 0.5rem;"></i>
+                                Final Recommendation
+                            </h3>
+                            <div style="color: var(--text-secondary); font-size: 0.9rem;">
+                                ${consensus} consensus from ${signals.length} indicators
+                            </div>
+                        </div>
+                        <div class="recommendation-signal">
+                            <div style="font-size: 1.5rem; font-weight: bold; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'};">
+                                ${overallSignal}
+                            </div>
+                            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.2rem;">
+                                ${buyCount}B • ${sellCount}S • ${holdCount}H
+                            </div>
+                        </div>
+                        <div class="recommendation-action">
+                            <div style="font-weight: bold; color: ${signalType === 'bullish' ? 'var(--success)' : signalType === 'bearish' ? 'var(--danger)' : '#6c757d'}; padding: 0.5rem 1rem; background: var(--bg-secondary); border-radius: 4px; text-align: center;">
+                                ${overallSignal === 'BUY' ? '🎯 EXECUTE LONG' : 
+                                  overallSignal === 'SELL' ? '🎯 EXECUTE SHORT' : 
+                                  '🎯 WAIT & WATCH'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Generate Price Chart Card by copying Detail section structure
+        function generatePriceChartCard(analyses) {
+            const hasRSI = analyses.rsi && Object.keys(analyses.rsi).length > 0;
+            const hasEMA = analyses.ema && Object.keys(analyses.ema).length > 0;
+            const hasDMA = analyses.dma && Object.keys(analyses.dma).length > 0;
+            
+            return `
+                <div class="analysis-card chart-card" style="border: 1px solid var(--border-color);">
+                    <!-- Exact copy of Detail section chart content -->
+                    <div class="mb-3" style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1rem 0.5rem 1rem;">
+                        <h4 style="margin: 0;"><i class="fas fa-chart-area"></i> Price Chart</h4>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <label class="form-label" style="margin: 0;">Chart Type:</label>
+                            <select id="analysisChartTypeSelect" onchange="changeAnalysisChartType()" class="form-select" style="font-size: 0.85rem; padding: 0.25rem;">
+                                <option value="line">Line Chart</option>
+                                <option value="candlestick">Candlestick (Colored Points)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Chart tabs -->
+                    <div style="padding: 0 1rem; margin-bottom: 0.5rem;">
+                        <div class="chart-tabs">
+                            <button class="chart-tab ${hasRSI ? 'active' : 'disabled'}" data-chart="rsi" onclick="switchAnalysisChartTab('rsi')" ${!hasRSI ? 'disabled' : ''}>RSI</button>
+                            <button class="chart-tab ${!hasRSI && hasEMA ? 'active' : hasEMA ? '' : 'disabled'}" data-chart="ema" onclick="switchAnalysisChartTab('ema')" ${!hasEMA ? 'disabled' : ''}>EMA</button>
+                            <button class="chart-tab ${!hasRSI && !hasEMA && hasDMA ? 'active' : hasDMA ? '' : 'disabled'}" data-chart="dma" onclick="switchAnalysisChartTab('dma')" ${!hasDMA ? 'disabled' : ''}>DMA</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Direct copy of chartContainer from Detail section -->
+                    <div id="analysisChartContainer" style="padding: 0 1rem 1rem 1rem;">
+                        <div class="chart-container">
+                            <canvas id="analysisChart" width="400" height="250"></canvas>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Switch chart tab functionality - simplified to use existing chart system
+        function switchAnalysisChartTab(chartType) {
+            console.log('Switching to analysis chart tab:', chartType);
+            
+            // Update current scanner to match the selected chart
+            const originalScanner = currentScanner;
+            currentScanner = chartType;
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.chart-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Add active class to selected tab
+            const selectedTab = document.querySelector(`[data-chart="${chartType}"]`);
+            if (selectedTab && !selectedTab.disabled) {
+                selectedTab.classList.add('active');
+                
+                // Use existing chart creation function with analysis chart canvas
+                if (scannerChartData[chartType]) {
+                    console.log('Creating chart using existing system for:', chartType);
+                    const chartTypeSelect = document.getElementById('analysisChartTypeSelect');
+                    const selectedChartType = chartTypeSelect ? chartTypeSelect.value : 'line';
+                    
+                    // Temporarily redirect chart creation to analysis canvas
+                    const originalChartContainer = document.getElementById('chartContainer');
+                    const originalCanvas = document.getElementById('priceChart');
+                    const analysisContainer = document.getElementById('analysisChartContainer');
+                    const analysisCanvas = document.getElementById('analysisChart');
+                    
+                    if (analysisContainer && analysisCanvas) {
+                        // Temporarily replace the chart elements
+                        analysisContainer.id = 'chartContainer';
+                        analysisCanvas.id = 'priceChart';
+                        
+                        // Create chart using existing function
+                        createChart(scannerChartData[chartType], selectedChartType);
+                        
+                        // Restore original IDs
+                        analysisContainer.id = 'analysisChartContainer';
+                        analysisCanvas.id = 'analysisChart';
+                    }
+                } else {
+                    console.warn('No chart data available for:', chartType);
+                    showAnalysisNoChartData(chartType);
+                }
+            }
+            
+            // Restore original scanner
+            currentScanner = originalScanner;
+        }
+        
+        // Change analysis chart type - simplified
+        function changeAnalysisChartType() {
+            const chartTypeSelect = document.getElementById('analysisChartTypeSelect');
+            const activeTab = document.querySelector('.chart-tab.active');
+            
+            if (chartTypeSelect && activeTab) {
+                const chartType = activeTab.getAttribute('data-chart');
+                if (chartType && scannerChartData[chartType]) {
+                    // Re-trigger the chart creation with new type
+                    switchAnalysisChartTab(chartType);
+                }
+            }
+        }
+        
+        // Show message when no chart data is available
+        function showAnalysisNoChartData(chartType) {
+            const chartContainer = document.getElementById('analysisChartContainer');
+            if (chartContainer) {
+                chartContainer.innerHTML = `
+                    <div class="chart-container" style="height: 250px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary);">
+                        <div style="text-align: center;">
+                            <i class="fas fa-chart-line" style="font-size: 3rem; margin-bottom: 1rem; display: block; color: var(--text-muted);"></i>
+                            <div style="font-size: 1.1rem; margin-bottom: 0.5rem;">No ${chartType.toUpperCase()} Chart Data</div>
+                            <div style="font-size: 0.8rem;">Run ${chartType.toUpperCase()} analysis to view chart</div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Initial date and time setup
+        updateDateTime();
+        setInterval(updateDateTime, 1000); // Update every second
+        // Modal: show chart in full-page popup
+        let __chartModalState = { swapped: false };
+
+        function showChartModal(preferred = null) {
+            const modal = document.getElementById('chartModal');
+            if (!modal) return;
+
+            // Enable/disable tabs based on available data
+            const hasRSI = scannerChartData.rsi && Object.keys(scannerChartData.rsi).length > 0;
+            const hasEMA = scannerChartData.ema && Object.keys(scannerChartData.ema).length > 0;
+            const hasDMA = scannerChartData.dma && Object.keys(scannerChartData.dma).length > 0;
+
+            ['rsi','ema','dma'].forEach(t => {
+                const btn = document.querySelector(`#chartModal .chart-tab[data-chart="${t}"]`);
+                if (btn) {
+                    const enabled = (t==='rsi'?hasRSI:(t==='ema'?hasEMA:hasDMA));
+                    btn.disabled = !enabled;
+                    btn.classList.toggle('disabled', !enabled);
+                    btn.classList.remove('active');
+                }
+            });
+
+            // Pick active dataset
+            let active = preferred && ((preferred==='rsi'&&hasRSI)||(preferred==='ema'&&hasEMA)||(preferred==='dma'&&hasDMA)) ? preferred : (hasRSI?'rsi':hasEMA?'ema':hasDMA?'dma':null);
+
+            // Chart type initial
+            const globalTypeSel = document.getElementById('chartTypeSelect');
+            const modalTypeSel = document.getElementById('modalChartTypeSelect');
+            if (modalTypeSel) modalTypeSel.value = globalTypeSel ? globalTypeSel.value : 'line';
+
+            // Swap IDs so createChart targets modal canvas safely (avoid duplicates)
+            const origContainer = document.getElementById('chartContainer');
+            const origCanvas = document.getElementById('priceChart');
+            if (origContainer) origContainer.id = 'chartContainerOrig';
+            if (origCanvas) origCanvas.id = 'priceChartOrig';
+            const fullContainer = document.getElementById('fullChartContainer');
+            const fullCanvas = document.getElementById('fullPriceChart');
+            if (fullContainer) fullContainer.id = 'chartContainer';
+            if (fullCanvas) fullCanvas.id = 'priceChart';
+            __chartModalState.swapped = true;
+
+            // Open modal
+            modal.classList.remove('hidden');
+            document.documentElement.style.overflow = 'hidden';
+
+            // Activate tab and render
+            if (active) {
+                const btn = document.querySelector(`#chartModal .chart-tab[data-chart="${active}"]`);
+                if (btn) btn.classList.add('active');
+                const chartType = modalTypeSel ? modalTypeSel.value : 'line';
+                createChart(scannerChartData[active], chartType);
+            } else {
+                const container = document.getElementById('chartContainer');
+                if (container) container.innerHTML = '<div class="chart-container" style="height: 70vh; display:flex; align-items:center; justify-content:center; color: var(--text-secondary);"><div>No chart data available</div></div>';
+            }
+        }
+
+        function closeChartModal() {
+            const modal = document.getElementById('chartModal');
+            if (!modal) return;
+            // Restore IDs
+            if (__chartModalState.swapped) {
+                const fullContainer = document.getElementById('chartContainer');
+                const fullCanvas = document.getElementById('priceChart');
+                if (fullContainer) fullContainer.id = 'fullChartContainer';
+                if (fullCanvas) fullCanvas.id = 'fullPriceChart';
+                const origContainer = document.getElementById('chartContainerOrig');
+                const origCanvas = document.getElementById('priceChartOrig');
+                if (origContainer) origContainer.id = 'chartContainer';
+                if (origCanvas) origCanvas.id = 'priceChart';
+                __chartModalState.swapped = false;
+            }
+            modal.classList.add('hidden');
+            document.documentElement.style.overflow = '';
+        }
+
+        function switchModalChartTab(kind) {
+            // Update active tab
+            document.querySelectorAll('#chartModal .chart-tab').forEach(b=>b.classList.remove('active'));
+            const btn = document.querySelector(`#chartModal .chart-tab[data-chart="${kind}"]`);
+            if (btn && !btn.disabled) btn.classList.add('active');
+            const typeSel = document.getElementById('modalChartTypeSelect');
+            const chartType = typeSel ? typeSel.value : 'line';
+            if (scannerChartData[kind]) {
+                createChart(scannerChartData[kind], chartType);
+            }
+        }
+
+        function changeModalChartType() {
+            const active = document.querySelector('#chartModal .chart-tab.active');
+            const kind = active ? active.getAttribute('data-chart') : null;
+            if (kind && scannerChartData[kind]) {
+                const typeSel = document.getElementById('modalChartTypeSelect');
+                createChart(scannerChartData[kind], typeSel ? typeSel.value : 'line');
+            }
+        }
+
+        // Replace scroll behavior with modal open
+        async function openPriceChart(symbol = null) {
+            // If symbol provided, load chart data on demand for each scanner
+            if (symbol) {
+                // Preload one dataset to choose active tab
+                const kinds = ['rsi','ema','dma'];
+                let preferred = null;
+                for (const k of kinds) {
+                    try {
+                        const res = await fetch(`/api/chart-data/${k}/${encodeURIComponent(symbol)}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (data && data.chartData) {
+                                scannerChartData[k] = data.chartData;
+                                if (!preferred) preferred = k;
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+                showChartModal(preferred);
+                return;
+            }
+            // Fallback: use existing cached datasets
+            const hasRSI = scannerChartData.rsi && Object.keys(scannerChartData.rsi).length > 0;
+            const hasEMA = scannerChartData.ema && Object.keys(scannerChartData.ema).length > 0;
+            const hasDMA = scannerChartData.dma && Object.keys(scannerChartData.dma).length > 0;
+            const preferred = hasRSI ? 'rsi' : hasEMA ? 'ema' : hasDMA ? 'dma' : null;
+            showChartModal(preferred);
+        }
+    </script>
+
+    <!-- Full-screen Chart Modal -->
+    <div id="chartModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Price Chart">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title"><i class="fas fa-chart-area"></i> Price Chart</h3>
+                <div style="display:flex; align-items:center; gap:0.75rem;">
+                    <label class="form-label" for="modalChartTypeSelect" style="margin:0;">Chart Type:</label>
+                    <select id="modalChartTypeSelect" class="form-select" onchange="changeModalChartType()" style="font-size:0.85rem; padding:0.25rem;">
+                        <option value="line">Line Chart</option>
+                        <option value="candlestick">Candlestick (Colored Points)</option>
+                    </select>
+                    <button class="modal-close" onclick="closeChartModal()" aria-label="Close"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div class="modal-tabs" style="padding:0 1rem 0.5rem 1rem;">
+                <div class="chart-tabs">
+                    <button class="chart-tab" data-chart="rsi" onclick="switchModalChartTab('rsi')">RSI</button>
+                    <button class="chart-tab" data-chart="ema" onclick="switchModalChartTab('ema')">EMA</button>
+                    <button class="chart-tab" data-chart="dma" onclick="switchModalChartTab('dma')">DMA</button>
+                </div>
+            </div>
+            <div id="fullChartContainer" style="padding: 0 1rem 1rem 1rem; height: calc(100% - 110px);">
+                <div class="chart-container" style="height:100%;">
+                    <canvas id="fullPriceChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
+
+
+
+
+
