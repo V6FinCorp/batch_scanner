@@ -1,6 +1,33 @@
 {
     "symbols": [
-        "ADANIENT"
+        "ADANIENT",
+        "ADANIPORTS",
+        "APOLLOHOSP",
+        "ASIANPAINT",
+        "AXISBANK",
+        "BAJAJ-AUTO",
+        "BAJFINANCE",
+        "BAJAJFINSV",
+        "BEL",
+        "BHARTIARTL",
+        "CIPLA",
+        "COALINDIA",
+        "DRREDDY",
+        "EICHERMOT",
+        "GRASIM",
+        "HCLTECH",
+        "HDFCBANK",
+        "HDFCLIFE",
+        "HEROMOTOCO",
+        "HINDALCO",
+        "HINDUNILVR",
+        "ICICIBANK",
+        "INDUSINDBK",
+        "INFY",
+        "ITC",
+        "JIOFIN",
+        "JSWSTEEL",
+        "KOTAKBANK"
     ],
     "days_fallback_threshold": 200,
     "rsi_periods": [
@@ -11,7 +38,7 @@
     ],
     "rsi_overbought": 70,
     "rsi_oversold": 30,
-    "base_timeframe": "30mins",
-    "default_timeframe": "30mins",
+    "base_timeframe": "15mins",
+    "default_timeframe": "15mins",
     "days_to_list": 4
 }

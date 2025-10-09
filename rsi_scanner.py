@@ -317,7 +317,6 @@ def run_rsi_scanner():
         print("Config file not found. Using default parameters.")
         # Default configuration when no config file exists
         config = {
-            "symbols": ["ITC"],
             "days_fallback_threshold": 200,
             "rsi_periods": [15, 30, 60],
             "base_timeframe": "15mins",
@@ -328,7 +327,19 @@ def run_rsi_scanner():
         }
         print("Using built-in defaults")
 
-    symbols = config['symbols']
+    # Load centralized symbols if not present in config (for standalone execution)
+    if 'symbols' not in config:
+        try:
+            symbols_config_path = os.path.join(os.path.dirname(__file__), 'config', 'symbols.config.json')
+            with open(symbols_config_path, 'r') as f:
+                symbols_data = json.load(f)
+            symbols = symbols_data.get('symbols', ["ITC"])
+            print(f"Loaded centralized symbols: {len(symbols)} symbols")
+        except FileNotFoundError:
+            symbols = ["ITC"]
+            print("Centralized symbols file not found, using default symbol")
+    else:
+        symbols = config['symbols']
     rsi_periods = config['rsi_periods']
     base_timeframe = config.get('base_timeframe', '15mins')
     days_to_list = config.get('days_to_list', 2)

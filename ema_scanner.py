@@ -295,7 +295,6 @@ def run_ema_scanner():
         print("Config file not found. Using default parameters.")
         # Default configuration when no config file exists
         config = {
-            "symbols": ["RELIANCE"],
             "ema_periods": [9, 15, 65, 200],
             "base_timeframe": "15mins",
             "days_to_list": 2,
@@ -303,7 +302,19 @@ def run_ema_scanner():
         }
         print("Using built-in defaults")
 
-    symbols = config['symbols']
+    # Load centralized symbols if not present in config (for standalone execution)
+    if 'symbols' not in config:
+        try:
+            symbols_config_path = os.path.join(os.path.dirname(__file__), 'config', 'symbols.config.json')
+            with open(symbols_config_path, 'r') as f:
+                symbols_data = json.load(f)
+            symbols = symbols_data.get('symbols', ["RELIANCE"])
+            print(f"Loaded centralized symbols: {len(symbols)} symbols")
+        except FileNotFoundError:
+            symbols = ["RELIANCE"]
+            print("Centralized symbols file not found, using default symbol")
+    else:
+        symbols = config['symbols']
     ema_periods = config['ema_periods']
     base_timeframe = config.get('base_timeframe', '15mins')
     days_to_list = config.get('days_to_list', 2)

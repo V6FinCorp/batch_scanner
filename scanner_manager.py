@@ -154,6 +154,9 @@ class ScannerManager:
             logger.info(f"Running {scanner_type} scanner for {symbols} ({enforced_base_timeframe}, {days_to_list} days)")
             
             # Load existing config file and merge with form values (without overwriting the config file)
+            # Always use centralized symbols instead of symbols from individual config files
+            centralized_symbols = self.load_centralized_symbols()
+            
             if scanner_type == 'rsi':
                 config_file = os.path.join(self.scanners_dir, 'config', 'rsi_config.json')
                 
@@ -167,8 +170,10 @@ class ScannerManager:
                     base_config = {}
                 
                 # Create runtime config (merge base with form values, form values take precedence)
+                # Use provided symbols if any, otherwise use centralized symbols
+                final_symbols = symbols if symbols else centralized_symbols
                 config_data = {
-                    "symbols": symbols,
+                    "symbols": final_symbols,
                     "days_fallback_threshold": kwargs.get('daysFallbackThreshold', base_config.get('days_fallback_threshold', 200)),
                     "rsi_periods": kwargs.get('rsiPeriods', base_config.get('rsi_periods', [15, 30, 60])),
                     "rsi_overbought": kwargs.get('rsiOverbought', base_config.get('rsi_overbought', 70)),
@@ -190,8 +195,10 @@ class ScannerManager:
                     base_config = {}
                 
                 # Create runtime config (merge base with form values, form values take precedence)
+                # Use provided symbols if any, otherwise use centralized symbols
+                final_symbols = symbols if symbols else centralized_symbols
                 config_data = {
-                    "symbols": symbols,
+                    "symbols": final_symbols,
                     "ema_periods": kwargs.get('emaPeriods', base_config.get('ema_periods', [9, 15, 65, 200])),
                     "base_timeframe": base_timeframe,
                     "days_to_list": days_to_list,
@@ -210,8 +217,10 @@ class ScannerManager:
                     base_config = {}
                 
                 # Create runtime config (DMA timeframe stays constant as per its config)
+                # Use provided symbols if any, otherwise use centralized symbols
+                final_symbols = symbols if symbols else centralized_symbols
                 config_data = {
-                    "symbols": symbols,
+                    "symbols": final_symbols,
                     "dma_periods": kwargs.get('dmaPeriods', base_config.get('dma_periods', [10, 20, 50])),
                     "base_timeframe": base_config.get('base_timeframe', enforced_base_timeframe),
                     "days_to_list": days_to_list,
@@ -667,9 +676,9 @@ class ScannerManager:
         return scanners
 
     def get_symbols(self):
-        """Get available symbols from JSON file"""
+        """Get available symbols from centralized symbols.config.json file"""
         try:
-            symbols_file = os.path.join(self.scanners_dir, 'config', 'symbols_for_db.json')
+            symbols_file = os.path.join(self.scanners_dir, 'config', 'symbols.config.json')
             if os.path.exists(symbols_file):
                 with open(symbols_file, 'r') as f:
                     data = json.load(f)
@@ -683,6 +692,21 @@ class ScannerManager:
         except Exception as e:
             print(f"Error loading symbols: {e}")
             return {"error": str(e)}
+    
+    def load_centralized_symbols(self):
+        """Load symbols from the centralized symbols.config.json file"""
+        try:
+            symbols_file = os.path.join(self.scanners_dir, 'config', 'symbols.config.json')
+            if os.path.exists(symbols_file):
+                with open(symbols_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('symbols', [])
+            else:
+                logger.warning("Centralized symbols.config.json not found, using default symbols")
+                return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "WIPRO", "LT", "BAJFINANCE", "KOTAKBANK", "ITC"]
+        except Exception as e:
+            logger.error(f"Error loading centralized symbols: {e}")
+            return ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY"]
 
     def get_scanner_results(self, scanner_type):
         """Get stored results for a specific scanner type"""

@@ -142,7 +142,6 @@ def get_config(config_type):
             # Return default values if config file doesn't exist
             defaults = {
                 'rsi': {
-                    'symbols': ['ITC'],
                     'rsi_periods': [15, 30, 60],
                     'base_timeframe': '15mins',
                     'days_to_list': 2,
@@ -151,14 +150,12 @@ def get_config(config_type):
                     'rsi_oversold': 30
                 },
                 'ema': {
-                    'symbols': ['RELIANCE'],
                     'ema_periods': [9, 15, 65, 200],
                     'base_timeframe': '15mins',
                     'days_to_list': 2,
                     'days_fallback_threshold': 200
                 },
                 'dma': {
-                    'symbols': ['RELIANCE'],
                     'dma_periods': [10, 20, 50],
                     'base_timeframe': '1hour',
                     'days_to_list': 2,

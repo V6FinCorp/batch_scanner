@@ -427,7 +427,6 @@ def run_dma_scanner():
         logger.warning("Config file not found. Using default parameters.")
         # Default configuration when no config file exists
         config = {
-            "symbols": ["RELIANCE"],
             "dma_periods": [10, 20, 50],
             "base_timeframe": "1hour",
             "days_to_list": 2,
@@ -436,7 +435,19 @@ def run_dma_scanner():
         }
         logger.info("Using built-in defaults")
 
-    symbols = config['symbols']
+    # Load centralized symbols if not present in config (for standalone execution)
+    if 'symbols' not in config:
+        try:
+            symbols_config_path = os.path.join(os.path.dirname(__file__), 'config', 'symbols.config.json')
+            with open(symbols_config_path, 'r') as f:
+                symbols_data = json.load(f)
+            symbols = symbols_data.get('symbols', ["RELIANCE"])
+            logger.info(f"Loaded centralized symbols: {len(symbols)} symbols")
+        except FileNotFoundError:
+            symbols = ["RELIANCE"]
+            logger.warning("Centralized symbols file not found, using default symbol")
+    else:
+        symbols = config['symbols']
     dma_periods = config['dma_periods']
     base_timeframe = config.get('base_timeframe', '15mins')
     days_to_list = config.get('days_to_list', 2)

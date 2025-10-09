@@ -96,7 +96,7 @@ scanners/
 │   ├── rsi_config.json
 │   ├── ema_config.json
 │   ├── dma_config.json
-│   └── symbols_for_db.json
+│   └── symbols.config.json    # Centralized symbols configuration
 ├── data/                      # Scanner output data
 │   └── [SYMBOL]/             # Symbol-specific data folders
 └── data_loader/              # Data loading utilities
@@ -109,12 +109,20 @@ scanners/
 
 ## 🔧 Configuration
 
-Each scanner has its own configuration file in `scanners/config/`:
+**Centralized Symbol Management**: All symbols are now managed through a single `symbols.config.json` file. Individual scanner configuration files no longer contain symbol arrays, ensuring consistency across all scanners.
+
+Each scanner has its own configuration file in `scanners/config/`, and all symbols are managed centrally:
+
+### Centralized Symbols Config (`symbols.config.json`)
+```json
+{
+    "symbols": ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "ITC", "WIPRO", "LT", "BAJFINANCE", "KOTAKBANK"]
+}
+```
 
 ### RSI Config (`rsi_config.json`)
 ```json
 {
-    "symbols": ["RELIANCE"],
     "rsi_periods": [15, 30, 60],
     "base_timeframe": "15mins",
     "days_to_list": 2,
@@ -125,7 +133,6 @@ Each scanner has its own configuration file in `scanners/config/`:
 ### EMA Config (`ema_config.json`)
 ```json
 {
-    "symbols": ["RELIANCE"],
     "ema_periods": [9, 15, 65, 200],
     "base_timeframe": "15mins",
     "days_to_list": 2,
@@ -136,7 +143,6 @@ Each scanner has its own configuration file in `scanners/config/`:
 ### DMA Config (`dma_config.json`)
 ```json
 {
-    "symbols": ["RELIANCE"],
     "dma_periods": [10, 20, 50],
     "base_timeframe": "15mins",
     "days_to_list": 2,
@@ -176,7 +182,7 @@ fetch('/api/run-scanner', {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
         scanner: 'rsi',
-        symbols: ['RELIANCE'],
+        symbols: ['RELIANCE'],  // Optional: uses centralized symbols if not provided
         rsi_periods: [15, 30, 60],
         baseTimeframe: '15mins',
         daysToList: 2
@@ -191,7 +197,7 @@ fetch('/api/run-scanner', {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
         scanner: 'ema',
-        symbols: ['RELIANCE'],
+        symbols: ['RELIANCE'],  // Optional: uses centralized symbols if not provided
         ema_periods: [9, 15, 65, 200],
         baseTimeframe: '15mins',
         daysToList: 2
