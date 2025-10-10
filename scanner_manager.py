@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import logging
+import threading
 import traceback
 from typing import Dict, List, Any, Optional, Union
 
@@ -32,6 +33,8 @@ class ScannerManager:
             'ema': {'results': None, 'output': '', 'chart_data': None, 'last_run': None},
             'dma': {'results': None, 'output': '', 'chart_data': None, 'last_run': None}
         }
+        # Serialize scanner runs to prevent config backup/restore conflicts
+        self._lock = threading.Lock()
         logger.info("Scanner Manager initialized")
         
     def report_error(self, category: str, message: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -132,6 +135,9 @@ class ScannerManager:
     def run_scanner(self, scanner_type, symbols, base_timeframe, days_to_list, **kwargs):
         """Run a scanner and return results with enhanced error handling"""
         try:
+            # Ensure lock exists (defensive)
+            if not hasattr(self, '_lock'):
+                self._lock = threading.Lock()
             # For DMA, enforce timeframe from its own config regardless of incoming value
             enforced_base_timeframe = base_timeframe
             if scanner_type == 'dma':
@@ -235,38 +241,40 @@ class ScannerManager:
             original_config_file = config_file
             temp_config_file = os.path.join(self.scanners_dir, 'config', f'temp_{scanner_type}_config.json')
             backup_config_file = os.path.join(self.scanners_dir, 'config', f'backup_{scanner_type}_config.json')
-            
-            os.makedirs(os.path.dirname(temp_config_file), exist_ok=True)
-            
-            # Step 1: Backup original config
-            try:
-                if os.path.exists(original_config_file):
-                    # Remove any existing backup file first
-                    if os.path.exists(backup_config_file):
-                        os.remove(backup_config_file)
-                    os.rename(original_config_file, backup_config_file)
-                    logger.debug(f"Backed up original config to {backup_config_file}")
-            except Exception as e:
-                return self.report_error("configuration", f"Failed to backup configuration file: {str(e)}",
-                                    {"original_file": original_config_file, "backup_file": backup_config_file, "error": str(e)})
-            
-            # Step 2: Create temporary config with merged values  
-            try:
-                with open(original_config_file, 'w') as f:
-                    json.dump(config_data, f, indent=4)
-                    logger.debug(f"Created temporary config at {original_config_file}")
-            except Exception as e:
-                # Try to restore backup if creation fails
-                if os.path.exists(backup_config_file):
-                    try:
-                        os.rename(backup_config_file, original_config_file)
-                    except:
-                        pass  # If this fails too, we'll report the original error
-                return self.report_error("configuration", f"Failed to create temporary configuration: {str(e)}",
-                                    {"file": original_config_file, "config_data": config_data, "error": str(e)})
 
-            # Run the scanner
-            scanner_script = os.path.join(self.scanners_dir, f'{scanner_type}_scanner.py')
+            # Serialize all operations that mutate config and execute the scanner
+            with self._lock:
+                os.makedirs(os.path.dirname(temp_config_file), exist_ok=True)
+
+                # Step 1: Backup original config
+                try:
+                    if os.path.exists(original_config_file):
+                        # Remove any existing backup file first
+                        if os.path.exists(backup_config_file):
+                            os.remove(backup_config_file)
+                        os.rename(original_config_file, backup_config_file)
+                        logger.debug(f"Backed up original config to {backup_config_file}")
+                except Exception as e:
+                    return self.report_error("configuration", f"Failed to backup configuration file: {str(e)}",
+                                        {"original_file": original_config_file, "backup_file": backup_config_file, "error": str(e)})
+
+                # Step 2: Create temporary config with merged values
+                try:
+                    with open(original_config_file, 'w') as f:
+                        json.dump(config_data, f, indent=4)
+                        logger.debug(f"Created temporary config at {original_config_file}")
+                except Exception as e:
+                    # Try to restore backup if creation fails
+                    if os.path.exists(backup_config_file):
+                        try:
+                            os.rename(backup_config_file, original_config_file)
+                        except Exception:
+                            pass  # If this fails too, we'll report the original error
+                    return self.report_error("configuration", f"Failed to create temporary configuration: {str(e)}",
+                                        {"file": original_config_file, "config_data": config_data, "error": str(e)})
+
+                # Run the scanner
+                scanner_script = os.path.join(self.scanners_dir, f'{scanner_type}_scanner.py')
 
             if not os.path.exists(scanner_script):
                 # Restore original config before returning error
@@ -279,28 +287,37 @@ class ScannerManager:
                 return self.report_error("configuration", f"Scanner script not found: {scanner_script}",
                                     {"script_path": scanner_script})
 
-            # Ensure data directory exists before running scanner for all symbols
-            try:
-                for sym in symbols:
-                    data_dir = os.path.join(self.scanners_dir, 'data', sym)
-                    os.makedirs(data_dir, exist_ok=True)
-                    logger.debug(f"Ensured data directory exists: {data_dir}")
-            except Exception as e:
-                return self.report_error("system", f"Failed to create data directory: {str(e)}",
-                                    {"error": str(e)})
+                # Ensure data directory exists before running scanner for all symbols
+                try:
+                    for sym in symbols:
+                        data_dir = os.path.join(self.scanners_dir, 'data', sym)
+                        os.makedirs(data_dir, exist_ok=True)
+                        logger.debug(f"Ensured data directory exists: {data_dir}")
+                except Exception as e:
+                    return self.report_error("system", f"Failed to create data directory: {str(e)}",
+                                        {"error": str(e)})
 
             # Run scanner and capture output
             try:
                 logger.info(f"Executing scanner script: {scanner_script}")
-                
+                # Choose a more generous timeout for heavier scanners like RSI
+                timeout_seconds = 120
+                if scanner_type == 'rsi':
+                    timeout_seconds = 300  # RSI can be heavier; allow up to 5 minutes for large batches
+                elif scanner_type == 'dma':
+                    timeout_seconds = 240
+                elif scanner_type == 'ema':
+                    timeout_seconds = 150
+                # Scale slightly with number of symbols (adds up to +60s for ~60 symbols)
+                timeout_seconds = int(min(600, timeout_seconds + min(len(symbols), 60)))
+                logger.info(f"Scanner timeout set to {timeout_seconds}s for type='{scanner_type}' over {len(symbols)} symbols")
+
                 result = subprocess.run(
                     [sys.executable, scanner_script],
                     cwd=self.scanners_dir,
                     capture_output=True,
                     text=True,
-                    timeout=120,  # Increased timeout to 2 minutes
-                    # Don't modify PYTHONPATH as it can cause issues in containerized environments
-                    # Instead, make sure imports work properly with proper package structure
+                    timeout=timeout_seconds,
                 )
 
                 logger.info(f"Scanner execution completed with return code: {result.returncode}")
@@ -741,3 +758,89 @@ class ScannerManager:
         except Exception as e:
             logger.exception('Error generating symbol chart data')
             return self.report_error('critical', f'Unhandled exception: {e}', {'symbol': symbol, 'scannerType': scanner_type})
+    
+    def get_symbol_analysis(self, scanner_type: str, symbol: str) -> Dict[str, Any]:
+        """Get cached analysis for a specific symbol or compute if not available"""
+        try:
+            # Check if we have cached results
+            stored_results = self.results_storage.get(scanner_type, {})
+            cached_results = stored_results.get('results', [])
+            
+            # Look for this symbol in cached results
+            for result in cached_results or []:
+                if result.get('Symbol') == symbol:
+                    return {'success': True, 'data': result, 'cached': True}
+            
+            # If not cached, check if CSV exists
+            if scanner_type == 'rsi':
+                csv_filename = f'{symbol}_multi_timeframe_rsi_data.csv'
+            else:
+                csv_filename = f'{symbol}_{scanner_type}_data.csv'
+
+            csv_file = os.path.join(self.scanners_dir, 'data', symbol, csv_filename)
+            if os.path.exists(csv_file):
+                try:
+                    df = pd.read_csv(csv_file)
+                    df = df.replace(['N/A', 'NaN', 'nan'], None)
+                    
+                    if not df.empty:
+                        # Get the latest row
+                        latest_row = df.iloc[-1:].copy()
+                        if 'Symbol' not in latest_row.columns:
+                            latest_row['Symbol'] = symbol
+                        
+                        # Convert to dict and clean numpy types
+                        row_dict = latest_row.to_dict('records')[0]
+                        for key, value in list(row_dict.items()):
+                            if pd.isna(value) or value is None:
+                                row_dict[key] = None
+                            elif hasattr(value, 'item'):
+                                row_dict[key] = value.item()
+                                
+                        return {'success': True, 'data': row_dict, 'cached': False}
+                        
+                except Exception as e:
+                    logger.error(f"Error reading CSV for {symbol}: {e}")
+            
+            # Return placeholder if no data available
+            return {
+                'success': True, 
+                'data': {
+                    'Symbol': symbol,
+                    'Status': 'Pending',
+                    'Message': 'Analysis not yet available'
+                },
+                'cached': False
+            }
+            
+        except Exception as e:
+            logger.exception(f'Error getting symbol analysis for {symbol}')
+            return self.report_error('critical', f'Error getting analysis: {e}', {'symbol': symbol})
+    
+    def run_progressive_analysis(self, scanner_type: str, base_timeframe: str, days_to_list: int, **kwargs) -> Dict[str, Any]:
+        """Run analysis progressively for better user experience"""
+        try:
+            # Get symbols from centralized config
+            symbols = self.load_centralized_symbols()
+            
+            # Return symbol table structure immediately
+            symbol_table = []
+            for symbol in symbols:
+                symbol_table.append({
+                    'Symbol': symbol,
+                    'Status': 'Queued',
+                    'CMP': 'Loading...',
+                    'LastUpdate': 'Pending'
+                })
+            
+            # Start background analysis (this would be handled by frontend polling)
+            return {
+                'success': True,
+                'symbols': symbol_table,
+                'message': f'Progressive analysis initiated for {len(symbols)} symbols',
+                'scanner_type': scanner_type
+            }
+            
+        except Exception as e:
+            logger.exception('Error in progressive analysis')
+            return self.report_error('critical', f'Progressive analysis failed: {e}', {})

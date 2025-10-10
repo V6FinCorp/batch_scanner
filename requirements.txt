@@ -1,8 +1,9 @@
 Flask==3.0.0
 Flask-CORS==4.0.0
-pandas==2.2.0
-requests==2.31.0
-numpy==1.26.0
+# Use versions compatible with Python 3.13 to avoid source builds
+numpy>=2.1.2
+pandas>=2.2.2
+requests>=2.31.0
 gunicorn==21.2.0
 python-dateutil>=2.8.2
 pytz>=2022.1

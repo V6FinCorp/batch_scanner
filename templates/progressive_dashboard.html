@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progressive Trading Scanner Dashboard</title>
+    <link rel="stylesheet" href="simple-theme.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+    <style>
+    /* Table styles */
+    table.symbols-table { width: 100%; border-collapse: collapse; }
+    table.symbols-table th, table.symbols-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid #333; text-align: right; }
+    table.symbols-table th { text-align: left; user-select: none; cursor: pointer; color: #ddd; }
+    table.symbols-table tr:hover { background: rgba(255,255,255,0.03); }
+    table.symbols-table td.symbol-col, table.symbols-table th.symbol-col { text-align: left; position: sticky; left: 0; background: var(--bg-primary, #1a1a1a); }
+    .cell-muted { color: #888; }
+    .btn-icon { background: #2f2f2f; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: 0.25rem 0.4rem; margin: 0 0.15rem; cursor: pointer; }
+    .btn-icon:hover { background: #3b3b3b; }
+    .status-badge { display: inline-block; min-width: 60px; padding: 0.1rem 0.4rem; border-radius: 10px; font-size: 0.7rem; text-align: center; }
+    .status-idle { background: #374151; color: #9ca3af; border: 1px solid #4b5563; }
+    .status-running { background: #fbbf24; color: #92400e; border: 1px solid #f59e0b; }
+    .status-success { background: #10b981; color: #065f46; border: 1px solid #059669; }
+    .status-error { background: #ef4444; color: #991b1b; border: 1px solid #dc2626; }
+    .execution-time { font-size: 0.7rem; margin-left: 0.25rem; opacity: 0.8; }
+    .toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .search-input { background: #0f0f0f; color: #ddd; border: 1px solid #333; border-radius: 4px; padding: 0.4rem 0.6rem; min-width: 200px; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .controls-section {
+            display: flex;
+            gap: 1rem;
+            margin: 1rem 0;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .batch-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .loading-spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #3498db;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+        }
+        
+        .modal-content {
+            background-color: var(--bg-primary, #1a1a1a);
+            margin: 5% auto;
+            padding: 2rem;
+            border: 1px solid #333;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .log-viewer {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #0f0f0f;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            white-space: pre-wrap;
+            color: #ccc;
+        }
+        
+        .log-entry {
+            margin-bottom: 0.25rem;
+            padding: 0.25rem;
+            border-radius: 2px;
+        }
+        
+        .log-entry.error {
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid #ef4444;
+        }
+        
+        .log-entry.warning {
+            background: rgba(251, 191, 36, 0.1);
+            border-left: 3px solid #fbbf24;
+        }
+        
+        .log-entry.info {
+            color: #94a3b8;
+        }
+        
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary, #2a2a2a);
+            border-top: 1px solid #333;
+            padding: 0.5rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+        }
+        
+        .btn-close {
+            background: none;
+            border: none;
+            color: #999;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+        
+        .btn-close:hover {
+            color: #fff;
+        }
+
+        .theme-toggle { background: #2f2f2f; color:#ddd; border:1px solid #444; border-radius: 4px; padding: 0.35rem 0.5rem; cursor:pointer; }
+        .reco-bull { color:#10b981; font-weight:600; }
+        .reco-bear { color:#ef4444; font-weight:600; }
+        .reco-neutral { color:#9ca3af; }
+        .percent-pos { color:#22c55e; }
+        .percent-neg { color:#ef4444; }
+    .percent-neutral { color:#9ca3af; }
+    .rsi-pos { color:#10b981; font-weight:600; }
+    .rsi-neg { color:#ef4444; font-weight:600; }
+    .rsi-neutral { color:#9ca3af; }
+        .action-chip { display:inline-block; min-width:26px; padding:0.15rem 0.4rem; margin:0 0.1rem; border-radius:4px; text-align:center; cursor:pointer; background:#1f2937; color:#e5e7eb; border:1px solid #374151; font-size:0.85rem; }
+        .chip-running { animation: blink 1s linear infinite; }
+        @keyframes blink { 0%{opacity:1}50%{opacity:0.2}100%{opacity:1} }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="header-title"><i class="fas fa-chart-line"></i> Progressive Trading Scanner</h1>
+                <div class="header-actions">
+                    <div class="controls-section">
+                        <div class="batch-controls toolbar">
+                            <button id="runAllBtn" class="btn btn-primary">
+                                <i class="fas fa-rocket"></i> Run All Scanners
+                            </button>
+                            <button id="stopAllBtn" class="btn btn-secondary" disabled>
+                                <i class="fas fa-stop"></i> Stop All
+                            </button>
+                            <span style="opacity:0.6">|</span>
+                            <button id="runRSIAllBtn" class="btn btn-secondary" title="Run/Stop RSI for all symbols">
+                                <i class="fas fa-wave-square"></i> Run RSI All
+                            </button>
+                            <button id="runEMAAllBtn" class="btn btn-secondary" title="Run/Stop EMA for all symbols">
+                                <i class="fas fa-chart-line"></i> Run EMA All
+                            </button>
+                            <button id="runDMAAllBtn" class="btn btn-secondary" title="Run/Stop DMA for all symbols">
+                                <i class="fas fa-chart-bar"></i> Run DMA All
+                            </button>
+                            <button id="refreshSymbolsBtn" class="btn btn-secondary">
+                                <i class="fas fa-sync"></i> Refresh
+                            </button>
+                        </div>
+                        <div class="timeframe-selector">
+                            <label>TimeFrame:</label>
+                            <select id="timeframeSelect" class="form-select">
+                                <option value="5mins">5 mins</option>
+                                <option value="15mins" selected>15 mins</option>
+                                <option value="30mins">30 mins</option>
+                                <option value="1hour">1 hour</option>
+                                <option value="daily">Daily</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="margin-right:0.25rem;">EMA/DMA as %</label>
+                            <input type="checkbox" id="togglePct" />
+                        </div>
+                        <div id="filters" style="display:flex; gap:0.5rem; align-items:center;">
+                            <label style="margin-right:0.25rem;">Reco:</label>
+                            <label><input type="checkbox" id="filter_bull" checked/> Bull</label>
+                            <label><input type="checkbox" id="filter_neutral" checked/> Neutral</label>
+                            <label><input type="checkbox" id="filter_bear" checked/> Bear</label>
+                            <label style="margin-left:0.5rem; margin-right:0.25rem;">EMA/DMA % range:</label>
+                            <input type="number" id="filter_pct_min" placeholder="-5" style="width:70px" />
+                            <input type="number" id="filter_pct_max" placeholder="5" style="width:70px" />
+                            <label><input type="checkbox" id="filter_apply_ema" checked/> EMA</label>
+                            <label><input type="checkbox" id="filter_apply_dma" checked/> DMA</label>
+                            <button id="applyFiltersBtn" class="btn btn-secondary">Apply</button>
+                        </div>
+                        <button id="viewLogsBtn" class="btn btn-secondary">
+                            <i class="fas fa-file-alt"></i> View Logs
+                        </button>
+                        <button id="darkModeToggle" class="theme-toggle" title="Toggle Theme"><i class="fas fa-moon"></i></button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Loading State -->
+        <div id="loadingState" class="panel" style="text-align: center; padding: 2rem;">
+            <div class="loading-spinner"></div>
+            <span style="margin-left: 1rem;">Loading symbols...</span>
+        </div>
+
+        <!-- Symbols Table -->
+        <div id="symbolsContainer" class="panel" style="display: none;">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    <i class="fas fa-table"></i> Symbols Dashboard
+                </h2>
+                <div class="panel-actions">
+                    <span id="symbolStats">0 symbols loaded</span>
+                    <span id="progressInfo" style="margin-left: 1rem;"></span>
+                </div>
+            </div>
+            
+            <div class="panel-content">
+                <div class="toolbar" style="margin-bottom:0.5rem;">
+                    <!-- Search removed as requested -->
+                </div>
+                <div style="overflow:auto;">
+                    <table id="symbolsTable" class="symbols-table">
+                        <thead>
+                            <tr>
+                                <th class="symbol-col" data-key="Symbol">Symbol</th>
+                                <th data-key="CMP">CMP</th>
+                                <th data-key="Reco">Reco</th>
+                                <th data-key="rsi_5">RSI(5)</th>
+                                <th data-key="rsi_15">RSI(15)</th>
+                                <th data-key="rsi_30">RSI(30)</th>
+                                <th data-key="ema_9">EMA(9)</th>
+                                <th data-key="ema_15">EMA(15)</th>
+                                <th data-key="ema_21">EMA(21)</th>
+                                <th data-key="dma_10">DMA(10)</th>
+                                <th data-key="dma_20">DMA(20)</th>
+                                <th data-key="dma_50">DMA(50)</th>
+                                <th data-key="dma_100">DMA(100)</th>
+                                <th data-key="dma_200">DMA(200)</th>
+                                
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="symbolsTBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log Viewer Modal -->
+        <div id="logModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3><i class="fas fa-file-alt"></i> Application Logs</h3>
+                    <button id="closeLogModal" class="btn-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="controls-section">
+                        <button id="clearLogsBtn" class="btn btn-secondary">Clear Logs</button>
+                        <button id="refreshLogsBtn" class="btn btn-secondary">Refresh</button>
+                        <select id="logLevelFilter" class="form-select">
+                            <option value="all">All Levels</option>
+                            <option value="error">Errors Only</option>
+                            <option value="warning">Warnings+</option>
+                            <option value="info">Info+</option>
+                        </select>
+                    </div>
+                    <div id="logViewer" class="log-viewer">Loading logs...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div id="statusLeft">Ready</div>
+            <div id="statusRight"><span id="currentTime"></span></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.js"></script>
+    
+    <script>
+        // Global state
+    let symbols = [];
+    let scannerStates = {};
+    let runningScans = new Set();
+    let totalRunning = 0;
+    let stopRequested = false; // stop flag for batch runs
+    const stopRequestedFor = { rsi: false, ema: false, dma: false };
+    let currentSort = { key: 'Symbol', dir: 'asc' };
+    let showPctDiff = JSON.parse(localStorage.getItem('showPctDiff') || 'false');
+    let isDarkMode = JSON.parse(localStorage.getItem('darkMode') || 'false');
+    let chartInstance = null;
+        
+        // Toastr configuration
+        toastr.options = {
+            "closeButton": true,
+            "newestOnTop": true,
+            "progressBar": true,
+            "positionClass": "toast-top-right",
+            "timeOut": "4000",
+            "extendedTimeOut": "1000"
+        };
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', async function() {
+            updateStatusBar();
+            setInterval(updateTime, 1000);
+            
+            await loadSymbols();
+            setupEventListeners();
+            // init toggles
+            const pctEl = document.getElementById('togglePct');
+            pctEl.checked = showPctDiff;
+            pctEl.addEventListener('change', () => { showPctDiff = pctEl.checked; localStorage.setItem('showPctDiff', JSON.stringify(showPctDiff)); renderSymbolsTable(); });
+            loadDarkModePreference();
+            
+            // Hide loading state and show symbols
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('symbolsContainer').style.display = 'block';
+            
+            toastr.success('Dashboard loaded successfully!', 'Welcome');
+        });
+
+        // Load symbols from API
+        async function loadSymbols() {
+            try {
+                updateStatusBar('Loading symbols...');
+                // Retry with small backoff to survive cold-starts
+                const maxAttempts = 3;
+                let attempt = 0, response, data, lastErr;
+                while (attempt < maxAttempts) {
+                    try {
+                        response = await fetch('/api/symbol-table', { cache: 'no-store' });
+                        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        data = await response.json();
+                        break; // success
+                    } catch (err) {
+                        lastErr = err;
+                        attempt++;
+                        if (attempt < maxAttempts) {
+                            await new Promise(r => setTimeout(r, 400 * attempt));
+                        }
+                    }
+                }
+                if (!data) {
+                    throw lastErr || new Error('Failed to load symbol table');
+                }
+                
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to load symbol table');
+                }
+                
+                symbols = data.symbols || [];
+                
+                // Initialize scanner states
+                symbols.forEach(symbol => {
+                    const symbolName = symbol.Symbol || symbol;
+                    scannerStates[symbolName] = {
+                        rsi: { status: 'idle', time: null, data: null },
+                        ema: { status: 'idle', time: null, data: null },
+                        dma: { status: 'idle', time: null, data: null }
+                    };
+                });
+                
+                renderSymbolsTable();
+                updateSymbolStats();
+                updateStatusBar('Symbols loaded successfully');
+                
+            } catch (error) {
+                console.error('Failed to load symbols:', error);
+                toastr.error('Failed to load symbols: ' + error.message, 'Error');
+                updateStatusBar('Error loading symbols');
+                
+                // Show error state
+                document.getElementById('loadingState').innerHTML = `
+                    <div style="text-align: center; color: #ef4444;">
+                        <i class="fas fa-exclamation-triangle" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+                        <h3>Failed to load symbols</h3>
+                        <p>${error && error.message ? error.message : 'Request failed'}</p>
+                        <button onclick="location.reload()" class="btn btn-primary" style="margin-top: 1rem;">
+                            <i class="fas fa-refresh"></i> Retry
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // Render symbols table
+        function renderSymbolsTable() {
+            const tbody = document.getElementById('symbolsTBody');
+            tbody.innerHTML = '';
+
+            const sorted = [...symbols].sort((a, b) => compareByKey(a, b, currentSort.key, currentSort.dir));
+            sorted.forEach(row => tbody.appendChild(createTableRow(row)));
+
+            // wire header sorting
+            document.querySelectorAll('#symbolsTable thead th[data-key]')
+                .forEach(th => {
+                    th.onclick = () => {
+                        const key = th.getAttribute('data-key');
+                        if (currentSort.key === key) {
+                            currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+                        } else {
+                            currentSort.key = key; currentSort.dir = 'asc';
+                        }
+                        renderSymbolsTable();
+                    }
+                });
+
+            // filter
+            const search = document.getElementById('tableSearch');
+            if (search && !search._wired) {
+                search._wired = true;
+                search.addEventListener('input', () => applyFilter(search.value || ''));
+            }
+            // apply advanced filters after rendering
+            applyFilters();
+        }
+
+        // Compute numeric recommendation score for a symbol (used for sorting)
+        function computeRecoScore(symbolData) {
+            const safeNum = (v) => {
+                if (v === null || v === undefined) return null;
+                if (typeof v === 'number') return v;
+                const s = String(v).replace(/[^0-9.\-]/g, '');
+                const n = parseFloat(s);
+                return isNaN(n) ? null : n;
+            };
+
+            // symbolData can be either the API object or the symbol name string
+            let cmp = null, ema9 = null, ema15 = null, ema65 = null, ema200 = null, rsi15 = null;
+            if (typeof symbolData === 'string') {
+                // symbol name provided; attempt DOM fallback
+                const sym = symbolData;
+                const row = document.getElementById(`row-${sym}`);
+                if (row) {
+                    const cells = row.querySelectorAll('td');
+                    // CMP 1, RSI15 3, EMA9 6, EMA15 7, EMA65 8, EMA200 9
+                    const cmpCell = cells[1];
+                    if (cmpCell) {
+                        const attr = cmpCell.getAttribute && cmpCell.getAttribute('data-cmp');
+                        cmp = (attr !== null && attr !== undefined) ? parseFloat(attr) : safeNum(cmpCell.innerText);
+                    }
+                    const readIndicator = (cellIdx) => {
+                        const c = cells[cellIdx];
+                        if (!c) return null;
+                        // If percent-mode rendered, cell may contain data-pct
+                        const pctEl = c.querySelector && c.querySelector('[data-pct]');
+                        if (pctEl) {
+                            const pct = parseFloat(pctEl.getAttribute('data-pct'));
+                            if (!isNaN(pct) && cmp) {
+                                // reconstruct indicator value from percent: pct = (indicator - cmp)/cmp *100 => indicator = cmp*(1 + pct/100)
+                                return cmp * (1 + (pct / 100));
+                            }
+                        }
+                        return safeNum(c.innerText);
+                    };
+                    rsi15 = readIndicator(3);
+                    ema9 = readIndicator(6);
+                    ema15 = readIndicator(7);
+                    ema65 = readIndicator(8);
+                    ema200 = readIndicator(9);
+                }
+            } else {
+                // object from API
+                cmp = safeNum(symbolData.CMP || symbolData.cmp || symbolData['CMP']);
+                ema9 = safeNum(symbolData.ema_9);
+                ema15 = safeNum(symbolData.ema_15);
+                ema65 = safeNum(symbolData.ema_65);
+                ema200 = safeNum(symbolData.ema_200);
+                rsi15 = safeNum(symbolData.rsi_15);
+
+                // If missing numeric fields, try DOM fallback using symbol field
+                if ((ema9 === null || ema15 === null || ema65 === null) && (symbolData.Symbol || symbolData.symbol)) {
+                    const row = document.getElementById(`row-${symbolData.Symbol || symbolData.symbol}`);
+                    if (row) {
+                        const cells = row.querySelectorAll('td');
+                        const cmpCell = cells[1];
+                        if (cmpCell) {
+                            const attr = cmpCell.getAttribute && cmpCell.getAttribute('data-cmp');
+                            cmp = cmp || ((attr !== null && attr !== undefined) ? parseFloat(attr) : safeNum(cmpCell.innerText));
+                        }
+                        const readIndicator = (cellIdx) => {
+                            const c = cells[cellIdx];
+                            if (!c) return null;
+                            const pctEl = c.querySelector && c.querySelector('[data-pct]');
+                            if (pctEl) {
+                                const pct = parseFloat(pctEl.getAttribute('data-pct'));
+                                if (!isNaN(pct) && cmp) return cmp * (1 + (pct / 100));
+                            }
+                            return safeNum(c.innerText);
+                        };
+                        rsi15 = rsi15 || readIndicator(3);
+                        ema9 = ema9 || readIndicator(6);
+                        ema15 = ema15 || readIndicator(7);
+                        ema65 = ema65 || readIndicator(8);
+                        ema200 = ema200 || readIndicator(9);
+                    }
+                }
+            }
+
+            let score = 0;
+            if (ema9 !== null && ema15 !== null && ema65 !== null) {
+                if (ema9 > ema15 && ema15 > ema65) score += 2;
+                if (ema9 < ema15 && ema15 < ema65) score -= 2;
+            }
+            if (cmp !== null && ema200 !== null) {
+                if (cmp > ema200) score += 1.5; else if (cmp < ema200) score -= 1.5;
+            }
+            if (rsi15 !== null) {
+                if (rsi15 >= 70) score += 1;
+                else if (rsi15 <= 30) score -= 1;
+                else if (rsi15 >= 55) score += 0.5;
+                else if (rsi15 <= 45) score -= 0.5;
+            }
+            return score;
+        }
+
+        function createTableRow(symbolData) {
+            const tr = document.createElement('tr');
+            const s = symbolData.Symbol || symbolData;
+            tr.id = `row-${s}`;
+
+            const getCellVal = (key) => symbolData[key] ?? '';
+            const td = (html, cls='') => { const c = document.createElement('td'); if (cls) c.className = cls; c.innerHTML = html; return c; };
+            const fmtNum = (v) => (v === null || v === undefined || v === '') ? '<span class="cell-muted">-</span>' : Number(v).toFixed(2);
+            const colorRsiHtml = (v) => {
+                if (v===null || v===undefined || v==='') return '<span class="cell-muted">-</span>';
+                const n = Number(v); if (isNaN(n)) return '<span class="cell-muted">-</span>';
+                // Per user: Red when >=70, Green when <=30, otherwise Grey
+                if (n >= 70) return `<span class="rsi-neg">${n.toFixed(2)}</span>`;
+                if (n <= 30) return `<span class="rsi-pos">${n.toFixed(2)}</span>`;
+                return `<span class="rsi-neutral">${n.toFixed(2)}</span>`;
+            };
+            const colorCompareHtml = (val, cmp) => {
+                // For EMA/DMA: Green if CMP > indicator, Red if CMP < indicator, Grey if equal or unavailable
+                if (val===null || val===undefined || val==='') return '<span class="cell-muted">-</span>';
+                const n = Number(val); const c = Number(cmp);
+                if (isNaN(n)) return '<span class="cell-muted">-</span>';
+                if (isNaN(c)) return `<span class="percent-neutral">${n.toFixed(2)}</span>`;
+                if (c > n) return `<span class="percent-pos">${n.toFixed(2)}</span>`; // CMP > indicator -> green
+                if (c < n) return `<span class="percent-neg">${n.toFixed(2)}</span>`; // CMP < indicator -> red
+                return `<span class="percent-neutral">${n.toFixed(2)}</span>`;
+            };
+            const pct = (val, cmp) => {
+                // val = indicator, cmp = CMP
+                if (val==null || val==='' || cmp==null || cmp==='' ) return '<span class="cell-muted">-</span>';
+                const n = Number(val), c = Number(cmp);
+                if (isNaN(n) || isNaN(c) || c===0) return '<span class="cell-muted">-</span>';
+                const d = ((n - c)/c)*100;
+                // Color GREEN when CMP > indicator (bullish), RED when CMP < indicator (bearish), GREY when equal
+                let cls = 'percent-neutral';
+                if (c > n) cls = 'percent-pos';
+                else if (c < n) cls = 'percent-neg';
+                return `<span class="${cls}" data-pct="${d}">${d.toFixed(2)}%</span>`;
+            };
+            const reco = () => {
+                // Weighted scoring to mimic legacy recommendation
+                // Sources: EMA alignment (9>15>21), CMP vs DMA200, RSI(15)
+                const safeNum = (v) => { const n = Number(v); return isNaN(n)?null:n; };
+                const cmp = safeNum(getCellVal('CMP'));
+                const ema9 = safeNum(getCellVal('ema_9'));
+                const ema15 = safeNum(getCellVal('ema_15'));
+                const ema21 = safeNum(getCellVal('ema_21'));
+                const dma200 = safeNum(getCellVal('dma_200'));
+                const rsi15 = safeNum(getCellVal('rsi_15'));
+
+                let score = 0;
+                // EMA alignment weight
+                if (ema9 !== null && ema15 !== null && ema21 !== null) {
+                    if (ema9 > ema15 && ema15 > ema21) score += 2; // bullish alignment
+                    if (ema9 < ema15 && ema15 < ema21) score -= 2; // bearish alignment
+                }
+                // CMP vs DMA200
+                if (cmp !== null && dma200 !== null) {
+                    if (cmp > dma200) score += 1.5; else if (cmp < dma200) score -= 1.5;
+                }
+                // RSI contribution
+                if (rsi15 !== null) {
+                    if (rsi15 >= 70) score += 1; // strong momentum
+                    else if (rsi15 <= 30) score -= 1; // strong sell pressure
+                    else if (rsi15 >= 55) score += 0.5;
+                    else if (rsi15 <= 45) score -= 0.5;
+                }
+
+                // Final mapping
+                if (score >= 2.5) return '<span class="reco-bull">Strong Bull</span>';
+                if (score >= 1.0) return '<span class="reco-bull">Bullish</span>';
+                if (score <= -2.5) return '<span class="reco-bear">Strong Bear</span>';
+                if (score <= -1.0) return '<span class="reco-bear">Bearish</span>';
+                return '<span class="reco-neutral">Neutral</span>';
+            };
+
+            // Symbol cell: chart icon directly left of symbol name
+            tr.appendChild(td(`<button class="btn-icon" title="Open Chart" onclick="openChartModal('${s}')" style="margin-right:8px"><i class="fas fa-chart-line"></i></button><span style="vertical-align:middle"><strong>${s}</strong></span>`, 'symbol-col'));
+            // CMP cell: render raw text but store a numeric data-cmp attribute for later comparisons
+            const rawCmp = getCellVal('CMP');
+            const cmpNum = (rawCmp === null || rawCmp === undefined || rawCmp === '') ? NaN : parseFloat(String(rawCmp).replace(/[^0-9.\-]/g,''));
+            const cmpCell = document.createElement('td');
+            cmpCell.innerHTML = rawCmp ? rawCmp : '<span class="cell-muted">-</span>';
+            if (!isNaN(cmpNum)) cmpCell.setAttribute('data-cmp', String(cmpNum));
+            tr.appendChild(cmpCell);
+            tr.appendChild(td(reco(), 'reco-cell'));
+            tr.appendChild(td(colorRsiHtml(getCellVal('rsi_5'))));
+            tr.appendChild(td(colorRsiHtml(getCellVal('rsi_15'))));
+            tr.appendChild(td(colorRsiHtml(getCellVal('rsi_30'))));
+            // Use numeric CMP when available (clean any currency/formatting). Pass numeric CMP into helpers
+            const cmpVal = !isNaN(cmpNum) ? cmpNum : NaN;
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('ema_9'), cmpVal) : colorCompareHtml(getCellVal('ema_9'), cmpVal)));
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('ema_15'), cmpVal) : colorCompareHtml(getCellVal('ema_15'), cmpVal)));
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('ema_21'), cmpVal) : colorCompareHtml(getCellVal('ema_21'), cmpVal)));
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_10'), cmpVal) : colorCompareHtml(getCellVal('dma_10'), cmpVal)));
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_20'), cmpVal) : colorCompareHtml(getCellVal('dma_20'), cmpVal)));
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_50'), cmpVal) : colorCompareHtml(getCellVal('dma_50'), cmpVal)));
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_100'), cmpVal) : colorCompareHtml(getCellVal('dma_100'), cmpVal)));
+            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_200'), cmpVal) : colorCompareHtml(getCellVal('dma_200'), cmpVal)));
+            // LastUpdate column removed to match legacy compact table
+
+            // Actions with per-scanner controls and status badges (reuse chip/time ids)
+            const actionsHtml = `
+                <span id="chip-${s}-rsi" class="action-chip status-idle" title="RSI" onclick="runScanner('${s}', 'rsi')">R</span>
+                <span id="chip-${s}-ema" class="action-chip status-idle" title="EMA" onclick="runScanner('${s}', 'ema')">E</span>
+                <span id="chip-${s}-dma" class="action-chip status-idle" title="DMA" onclick="runScanner('${s}', 'dma')">D</span>
+                <span id="chip-${s}-all" class="action-chip status-idle" title="Run All" onclick="retryAllScannersForSymbol('${s}')">All</span>
+            `;
+            tr.appendChild(td(actionsHtml));
+
+            // If the symbolData lacks some newer fields (rsi_5, ema_21, dma_100/dma_200),
+            // request per-symbol analysis to populate them. This handles cases where
+            // /api/symbol-table doesn't include those keys yet.
+            (function(symbolObj, rowId){
+                const has = (k) => symbolObj && symbolObj[k] !== undefined && symbolObj[k] !== null && symbolObj[k] !== '';
+                const needsRsi = !has('rsi_5') || !has('rsi_15');
+                const needsEma = !has('ema_9') || !has('ema_15') || !has('ema_21');
+                const needsDma = !has('dma_10') || !has('dma_20') || !has('dma_50') || !has('dma_100') || !has('dma_200');
+                if (needsRsi || needsEma || needsDma) {
+                    // small stagger to avoid bursting requests on large symbol lists
+                    setTimeout(() => {
+                        try {
+                            if (needsRsi) refreshRow(rowId, 'rsi');
+                            if (needsEma) refreshRow(rowId, 'ema');
+                            if (needsDma) refreshRow(rowId, 'dma');
+                        } catch(e) { /* ignore */ }
+                    }, 200);
+                }
+            })(symbolData, s);
+
+            return tr;
+        }
+
+        function compareByKey(a, b, key, dir) {
+            // Special-case Reco: compute numeric score for sorting to ensure proper ordering
+            if (key === 'Reco') {
+                const sa = computeRecoScore(a);
+                const sb = computeRecoScore(b);
+                const cmpScore = (sa || 0) - (sb || 0);
+                return dir === 'asc' ? cmpScore : -cmpScore;
+            }
+            const av = (a[key] !== undefined ? a[key] : (key==='CMP' ? a.CMP : (key==='Symbol' ? a.Symbol : undefined)));
+            const bv = (b[key] !== undefined ? b[key] : (key==='CMP' ? b.CMP : (key==='Symbol' ? b.Symbol : undefined)));
+            const toNum = (v) => {
+                if (v === null || v === undefined) return NaN;
+                if (typeof v === 'number') return v;
+                const s = String(v).replace(/[^0-9.\-]/g, '');
+                const n = parseFloat(s);
+                return isNaN(n) ? NaN : n;
+            };
+            let cmp = 0;
+            if (key === 'Symbol' || (isNaN(toNum(av)) && isNaN(toNum(bv)))) {
+                cmp = String(av || '').localeCompare(String(bv || ''));
+            } else {
+                cmp = (toNum(av) || 0) - (toNum(bv) || 0);
+            }
+            return dir === 'asc' ? cmp : -cmp;
+        }
+
+        function applyFilter(term) {
+            term = term.toUpperCase();
+            const tbody = document.getElementById('symbolsTBody');
+            tbody.querySelectorAll('tr').forEach(tr => {
+                const sym = tr.id.replace('row-','');
+                tr.style.display = sym.toUpperCase().includes(term) ? '' : 'none';
+            });
+        }
+
+        // New: apply advanced filters (Reco checkboxes + EMA/DMA percent ranges)
+        function applyFilters() {
+            const min = parseFloat(document.getElementById('filter_pct_min')?.value || NaN);
+            const max = parseFloat(document.getElementById('filter_pct_max')?.value || NaN);
+            const useEma = document.getElementById('filter_apply_ema')?.checked ?? true;
+            const useDma = document.getElementById('filter_apply_dma')?.checked ?? true;
+            const showBull = document.getElementById('filter_bull')?.checked ?? true;
+            const showNeutral = document.getElementById('filter_neutral')?.checked ?? true;
+            const showBear = document.getElementById('filter_bear')?.checked ?? true;
+
+            const tbody = document.getElementById('symbolsTBody');
+            tbody.querySelectorAll('tr').forEach(tr => {
+                let visible = true;
+                // Reco check
+                const recoCell = tr.querySelector('.reco-cell');
+                if (recoCell) {
+                    const txt = recoCell.innerText || '';
+                    if (txt.includes('Strong Bull') || txt.includes('Bullish')) {
+                        if (!showBull) visible = false;
+                    } else if (txt.includes('Strong Bear') || txt.includes('Bearish')) {
+                        if (!showBear) visible = false;
+                    } else {
+                        if (!showNeutral) visible = false;
+                    }
+                }
+
+                // EMA/DMA percent range check (only when pct toggle enabled)
+                if (visible && (useEma || useDma) && document.getElementById('togglePct')?.checked) {
+                    // Collect percent values from EMA/DMA columns (they have data-pct if rendered as pct)
+                    const cols = tr.querySelectorAll('td');
+                    const colIdxs = { ema:[6,7,8], dma:[9,10,11,12,13] };
+                    let inRange = true;
+                    const checkCols = [];
+                    if (useEma) checkCols.push(...colIdxs.ema);
+                    if (useDma) checkCols.push(...colIdxs.dma);
+                    for (const idx of checkCols) {
+                        const cell = cols[idx];
+                        if (!cell) continue;
+                        const pctEl = cell.querySelector('[data-pct]');
+                        let val = NaN;
+                        if (pctEl) {
+                            val = parseFloat(pctEl.getAttribute('data-pct'));
+                        } else {
+                            // attempt to parse text like "-1.23%"
+                            const txt = (cell.innerText || '').replace('%','').trim();
+                            const n = parseFloat(txt);
+                            if (!isNaN(n)) val = n;
+                        }
+                        if (!isNaN(min) && val < min) { inRange = false; break; }
+                        if (!isNaN(max) && val > max) { inRange = false; break; }
+                    }
+                    if (!inRange) visible = false;
+                }
+
+                tr.style.display = visible ? '' : 'none';
+            });
+        }
+
+        // Update scanner chip status (display time inside chip; running shows blink)
+        function updateScannerChip(symbol, scanner, status, time = null, error = null) {
+            const chip = document.getElementById(`chip-${symbol}-${scanner}`);
+            if (!chip) return;
+
+            // Normalize scanner key for state object (some callers may pass 'all')
+            if (!scannerStates[symbol]) scannerStates[symbol] = { rsi:{}, ema:{}, dma:{} };
+            if (!scannerStates[symbol][scanner]) scannerStates[symbol][scanner] = { status: 'idle', time: null };
+
+            // Update internal state
+            scannerStates[symbol][scanner].status = status;
+            scannerStates[symbol][scanner].time = time;
+
+            // Map short label
+            const labelMap = { rsi: 'R', ema: 'E', dma: 'D', all: 'All' };
+            const baseLabel = labelMap[scanner] || (scanner.toUpperCase ? scanner.toUpperCase() : String(scanner));
+
+            // Build chip content
+            if (status === 'running') {
+                chip.innerHTML = `${baseLabel} <i class="fas fa-spinner fa-spin" style="margin-left:6px;font-size:0.85em"></i>`;
+            } else if (status === 'success' && time !== null) {
+                chip.innerHTML = `${baseLabel} <span style="font-size:0.78em; opacity:0.9; margin-left:6px">(${time}s)</span>`;
+            } else if (status === 'error') {
+                chip.innerHTML = `${baseLabel} <i class="fas fa-exclamation-triangle" style="margin-left:6px;color:#ef4444"></i>`;
+            } else {
+                chip.textContent = baseLabel;
+            }
+
+            // Set classes: keep action-chip base, add running animation and status styling
+            const runningClass = status === 'running' ? 'chip-running' : '';
+            chip.className = `action-chip ${runningClass} status-${status}`.trim();
+
+            // Tooltip for errors
+            if (status === 'error' && error) {
+                chip.title = `Error: ${error}`;
+            } else {
+                chip.title = `${scanner.toUpperCase()} - ${status}`;
+            }
+        }
+
+        // Run individual scanner
+        async function runScanner(symbol, scanner) {
+            const scanKey = `${symbol}-${scanner}`;
+            
+            if (runningScans.has(scanKey)) {
+                toastr.warning(`${scanner.toUpperCase()} scanner already running for ${symbol}`, 'Already Running');
+                return;
+            }
+            
+            try {
+                runningScans.add(scanKey);
+                totalRunning++;
+                updateScannerChip(symbol, scanner, 'running');
+                updateProgress();
+                
+                toastr.info(`Starting ${scanner.toUpperCase()} analysis for ${symbol}`, 'Scanner Started');
+                
+                const startTime = Date.now();
+                
+                const response = await fetch('/api/run-single-scanner', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scanner: scanner,
+                        symbol: symbol,
+                        baseTimeframe: document.getElementById('timeframeSelect').value,
+                        daysToList: 4
+                    })
+                });
+                
+                const result = await response.json();
+                const executionTime = ((Date.now() - startTime) / 1000).toFixed(1);
+                
+                if (!response.ok || result.error) {
+                    throw new Error(result.error || 'Scanner execution failed');
+                }
+                
+                if (result.returncode === 0) {
+                    updateScannerChip(symbol, scanner, 'success', executionTime);
+                    toastr.success(`${scanner.toUpperCase()} completed for ${symbol} in ${executionTime}s`, 'Success');
+                    await refreshRow(symbol, scanner);
+                } else {
+                    throw new Error(result.error || `Scanner returned code ${result.returncode}`);
+                }
+                
+            } catch (error) {
+                console.error(`Scanner error for ${symbol}-${scanner}:`, error);
+                updateScannerChip(symbol, scanner, 'error', null, error.message);
+                toastr.error(`${scanner.toUpperCase()} failed for ${symbol}: ${error.message}`, 'Error');
+                
+            } finally {
+                runningScans.delete(scanKey);
+                totalRunning--;
+                updateProgress();
+            }
+        }
+
+        // Run all scanners for a symbol
+        async function retryAllScannersForSymbol(symbol) {
+            const scanners = ['rsi', 'ema', 'dma'];
+            
+            toastr.info(`Running all scanners for ${symbol}...`, 'Batch Analysis');
+            
+            for (const scanner of scanners) {
+                await runScanner(symbol, scanner);
+                // Small delay between scanners
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        // Run all for a specific scanner type
+        async function runAllOfScanner(scanner) {
+            const list = symbols.map(s => s.Symbol || s);
+            let completed = 0;
+            totalRunning = 0;
+            updateProgress();
+            stopRequestedFor[scanner] = false;
+            for (const sym of list) {
+                await runScanner(sym, scanner);
+                completed++;
+                updateStatusBar(`${scanner.toUpperCase()} progress: ${completed}/${list.length}`);
+                if (stopRequested || stopRequestedFor[scanner]) break;
+                await new Promise(r => setTimeout(r, 150));
+            }
+            updateStatusBar('Ready');
+        }
+
+        // Run all scanners for all symbols
+        async function runAllScanners() {
+            const runBtn = document.getElementById('runAllBtn');
+            const stopBtn = document.getElementById('stopAllBtn');
+            stopRequested = false;
+            runBtn.disabled = true;
+            stopBtn.disabled = false;
+            
+            toastr.info(`Starting batch analysis for ${symbols.length} symbols...`, 'Batch Analysis');
+            
+            const scanners = ['rsi', 'ema', 'dma'];
+            let completed = 0;
+            const total = symbols.length * scanners.length;
+            
+            try {
+                for (const symbol of symbols) {
+                    if (stopRequested) break;
+                    const symbolName = symbol.Symbol || symbol;
+                    for (const scanner of scanners) {
+                        if (stopRequested) break;
+                        try {
+                            await runScanner(symbolName, scanner);
+                        } catch (err) {
+                            // Keep going to next scan even if one fails
+                            console.error(`Batch scan error for ${symbolName}-${scanner}:`, err);
+                        }
+                        completed++;
+                        updateStatusBar(`Progress: ${completed}/${total} (${((completed/total)*100).toFixed(1)}%)`);
+                        // Small delay to prevent overwhelming the server
+                        await new Promise(resolve => setTimeout(resolve, 150));
+                    }
+                }
+                if (!stopRequested) {
+                    toastr.success('Batch analysis completed!', 'Success');
+                } else {
+                    toastr.warning('Batch analysis stopped by user', 'Stopped');
+                }
+            } catch (error) {
+                toastr.error('Batch analysis interrupted: ' + (error?.message || error), 'Error');
+            } finally {
+                runBtn.disabled = false;
+                stopBtn.disabled = true;
+                updateStatusBar('Batch analysis finished');
+            }
+        }
+
+        // Stop all running scanners
+        function stopAllScanners() {
+            stopRequested = true;
+            // Existing scans will complete; prevent new ones
+            toastr.info('Stopping after current scans finish...', 'Stopping');
+        }
+
+        // Setup event listeners
+        function setupEventListeners() {
+            document.getElementById('runAllBtn').onclick = runAllScanners;
+            document.getElementById('stopAllBtn').onclick = stopAllScanners;
+            document.getElementById('refreshSymbolsBtn').onclick = () => location.reload();
+            // Toggle-run/stop buttons for per-scanner batches
+            document.getElementById('runRSIAllBtn').onclick = async function() {
+                const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop RSI'; stopRequestedFor.rsi = false; btn.disabled = false; await runAllOfScanner('rsi'); btn._running = false; btn.innerHTML = '<i class="fas fa-wave-square"></i> Run RSI All'; } else { stopRequestedFor.rsi = true; }
+            };
+            document.getElementById('runEMAAllBtn').onclick = async function() {
+                const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop EMA'; stopRequestedFor.ema = false; btn.disabled = false; await runAllOfScanner('ema'); btn._running = false; btn.innerHTML = '<i class="fas fa-chart-line"></i> Run EMA All'; } else { stopRequestedFor.ema = true; }
+            };
+            document.getElementById('runDMAAllBtn').onclick = async function() {
+                const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop DMA'; stopRequestedFor.dma = false; btn.disabled = false; await runAllOfScanner('dma'); btn._running = false; btn.innerHTML = '<i class="fas fa-chart-bar"></i> Run DMA All'; } else { stopRequestedFor.dma = true; }
+            };
+            document.getElementById('viewLogsBtn').onclick = openLogModal;
+            document.getElementById('closeLogModal').onclick = closeLogModal;
+            document.getElementById('clearLogsBtn').onclick = clearLogs;
+            document.getElementById('refreshLogsBtn').onclick = loadLogs;
+            document.getElementById('darkModeToggle').onclick = toggleDarkMode;
+        }
+
+        async function refreshRow(symbol, scanner) {
+            try {
+                const res = await fetch(`/api/symbol-analysis/${scanner}/${symbol}`);
+                const data = await res.json();
+                if (!data || data.error || !data.data) return;
+                const row = document.getElementById(`row-${symbol}`);
+                if (!row) return;
+                const d = data.data;
+                // Update columns we know (new layout includes rsi_5, ema_21, dma_100, dma_200)
+                const map = {
+                    'rsi': ['rsi_5','rsi_15','rsi_30'],
+                    'ema': ['ema_9','ema_15','ema_21'],
+                    'dma': ['dma_10','dma_20','dma_50','dma_100','dma_200']
+                };
+                const fmt = (v) => (v===null||v===undefined||v==='')?'-':Number(v).toFixed(2);
+                const cells = row.querySelectorAll('td');
+                // Column indices based on new header order:
+                // Symbol(0), CMP(1), Reco(2), RSI5(3), RSI15(4), RSI30(5), EMA9(6), EMA15(7), EMA21(8), DMA10(9), DMA20(10), DMA50(11), DMA100(12), DMA200(13), Actions(14)
+                const colIndex = {
+                    'rsi_5':3,'rsi_15':4,'rsi_30':5,
+                    'ema_9':6,'ema_15':7,'ema_21':8,
+                    'dma_10':9,'dma_20':10,'dma_50':11,'dma_100':12,'dma_200':13
+                };
+                for (const key of map[scanner]) {
+                    // accept alternate key names returned by older APIs
+                    const alternates = [key];
+                    if (key === 'rsi_5') alternates.push('rsi_15','rsi_30');
+                    if (key === 'ema_21') alternates.push('ema_65');
+                    if (key === 'dma_100') alternates.push('dma_50');
+                    if (key === 'dma_200') alternates.push('ema_200','dma_50');
+                    // find first available data key in payload
+                    let dataKey = alternates.find(k => (k in d && d[k] !== undefined && d[k] !== null));
+                    if (!dataKey) dataKey = (key in d) ? key : null;
+                    if (dataKey && colIndex[key] !== undefined) {
+                        if (showPctDiff && (key.startsWith('ema_') || key.startsWith('dma_'))) {
+                            // Prefer numeric CMP stored on the cell via data-cmp
+                            const cmpAttr = cells[1]?.getAttribute && cells[1].getAttribute('data-cmp');
+                            const cmpVal = (cmpAttr !== null && cmpAttr !== undefined) ? parseFloat(cmpAttr) : parseFloat(cells[1]?.innerText?.replace(/[^0-9.\-]/g,'') || 'NaN');
+                            if (!isNaN(cmpVal) && cmpVal !== 0) {
+                                const n = parseFloat(d[dataKey]);
+                                if (!isNaN(n)) {
+                                    const delta = ((n - cmpVal)/cmpVal)*100;
+                                    // CMP > indicator -> bullish (green). CMP < indicator -> bearish (red). Equal -> neutral
+                                    let pctClass = 'percent-neutral';
+                                    if (cmpVal > n) pctClass = 'percent-pos';
+                                    else if (cmpVal < n) pctClass = 'percent-neg';
+                                    cells[colIndex[key]].innerHTML = `<span class="${pctClass}" data-pct="${delta}">${delta.toFixed(2)}%</span>`;
+                                } else {
+                                    cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
+                                }
+                            } else {
+                                cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
+                            }
+                        } else {
+                            // If this is an RSI key, colorize via RSI thresholds; otherwise compare to CMP for color
+                            if (key.startsWith('rsi_')) {
+                                const v = d[dataKey] ?? d[key];
+                                cells[colIndex[key]].innerHTML = (function(vv){ if (vv===null||vv===undefined||vv==='') return '<span class="cell-muted">-</span>'; const n=Number(vv); if (isNaN(n)) return '<span class="cell-muted">-</span>'; // Per user: >=70 red, <=30 green, else neutral
+                                    if (n >= 70) return `<span class="rsi-neg">${n.toFixed(2)}</span>`;
+                                    if (n <= 30) return `<span class="rsi-pos">${n.toFixed(2)}</span>`;
+                                    return `<span class="rsi-neutral">${n.toFixed(2)}</span>`; })(v);
+                            } else {
+                                // EMA/DMA: color relative to CMP (neutral if equal or CMP missing)
+                                const cmpAttr = cells[1]?.getAttribute && cells[1].getAttribute('data-cmp');
+                                const cmpValLocal = (cmpAttr !== null && cmpAttr !== undefined) ? parseFloat(cmpAttr) : parseFloat(cells[1]?.innerText?.replace(/[^0-9.\-]/g,'') || 'NaN');
+                                if (!isNaN(cmpValLocal)) {
+                                    const n = parseFloat(d[dataKey] ?? d[key]);
+                                    if (!isNaN(n)) {
+                                        let cls = 'percent-neutral';
+                                        if (cmpValLocal > n) cls = 'percent-pos';
+                                        else if (cmpValLocal < n) cls = 'percent-neg';
+                                        cells[colIndex[key]].innerHTML = `<span class="${cls}">${n.toFixed(2)}</span>`;
+                                    } else {
+                                        cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
+                                    }
+                                } else {
+                                    cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
+                                }
+                            }
+                        }
+                    }
+                }
+                // No LastUpdate column in compact view
+                // Update Reco cell (CMP is at col index 1)
+                const cmpVal = parseFloat(cells[1]?.innerText?.replace(/[^0-9.\-]/g,'') || '');
+                const readVal = (cellOrKey, idx) => {
+                    // Prefer data from API (d[key]) else from cell text, stripping % if present
+                    const k = cellOrKey;
+                    if (d && (k in d) && d[k] !== null && d[k] !== undefined) return parseFloat(d[k]);
+                    const txt = cells[idx]?.innerText || '';
+                    if (txt.includes('%')) return parseFloat(txt.replace('%','')) * 0.01 * cmpVal; // percent -> absolute
+                    return parseFloat(txt.replace(/[^0-9.\-]/g,''));
+                };
+                const ema9 = readVal('ema_9', 6);
+                const ema15 = readVal('ema_15', 7);
+                const ema21 = readVal('ema_21', 8);
+                const dma200 = readVal('dma_200', 13);
+                const rsi15 = readVal('rsi_15', 4);
+                let recoCell = row.querySelector('.reco-cell');
+                if (recoCell) {
+                    // Compute weighted score (same as initial render)
+                    const safeNum = (v) => { const n = Number(v); return isNaN(n)?null:n; };
+                    const cmp_v = safeNum(cmpVal);
+                    const e9 = safeNum(ema9), e15 = safeNum(ema15), e21 = safeNum(ema21), d200 = safeNum(dma200), r15 = safeNum(rsi15);
+                    let score = 0;
+                    if (e9 !== null && e15 !== null && e21 !== null) {
+                        if (e9 > e15 && e15 > e21) score += 2;
+                        if (e9 < e15 && e15 < e21) score -= 2;
+                    }
+                    if (cmp_v !== null && d200 !== null) { if (cmp_v > d200) score += 1.5; else if (cmp_v < d200) score -= 1.5; }
+                    if (r15 !== null) { if (r15 >= 70) score += 1; else if (r15 <= 30) score -= 1; else if (r15 >= 55) score += 0.5; else if (r15 <= 45) score -= 0.5; }
+                    if (score >= 2.5) recoCell.innerHTML = '<span class="reco-bull">Strong Bull</span>';
+                    else if (score >= 1.0) recoCell.innerHTML = '<span class="reco-bull">Bullish</span>';
+                    else if (score <= -2.5) recoCell.innerHTML = '<span class="reco-bear">Strong Bear</span>';
+                    else if (score <= -1.0) recoCell.innerHTML = '<span class="reco-bear">Bearish</span>';
+                    else recoCell.innerHTML = '<span class="reco-neutral">Neutral</span>';
+                }
+            } catch(e) { /* ignore */ }
+        }
+
+        // Update symbol statistics
+        function updateSymbolStats() {
+            const total = symbols.length;
+            document.getElementById('symbolStats').textContent = `${total} symbols loaded`;
+        }
+
+        // Update progress information
+        function updateProgress() {
+            const progressEl = document.getElementById('progressInfo');
+            if (totalRunning > 0) {
+                progressEl.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${totalRunning} scanners running`;
+                progressEl.style.color = '#fbbf24';
+            } else {
+                progressEl.textContent = '';
+            }
+        }
+
+        // Update status bar
+        function updateStatusBar(message = 'Ready') {
+            document.getElementById('statusLeft').textContent = message;
+        }
+
+        // Update current time
+        function updateTime() {
+            document.getElementById('currentTime').textContent = new Date().toLocaleTimeString();
+        }
+
+        // Log modal functions
+        function openLogModal() {
+            document.getElementById('logModal').style.display = 'block';
+            loadLogs();
+        }
+
+        function closeLogModal() {
+            document.getElementById('logModal').style.display = 'none';
+        }
+
+        async function loadLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const logViewer = document.getElementById('logViewer');
+                    if (data.logs && data.logs.length > 0) {
+                        logViewer.textContent = data.logs.join('');
+                        logViewer.scrollTop = logViewer.scrollHeight;
+                    } else {
+                        logViewer.textContent = 'No logs available';
+                    }
+                } else {
+                    throw new Error(data.error || 'Failed to load logs');
+                }
+            } catch (error) {
+                document.getElementById('logViewer').textContent = 'Error loading logs: ' + error.message;
+                toastr.error('Failed to load logs', 'Error');
+            }
+        }
+
+        async function clearLogs() {
+            try {
+                const response = await fetch('/api/clear-logs', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('logViewer').textContent = 'Logs cleared';
+                    toastr.success('Logs cleared successfully', 'Success');
+                } else {
+                    throw new Error(data.error || 'Failed to clear logs');
+                }
+            } catch (error) {
+                toastr.error('Failed to clear logs: ' + error.message, 'Error');
+            }
+        }
+
+        // Click outside modal to close
+        window.onclick = function(event) {
+            const modal = document.getElementById('logModal');
+            if (event.target === modal) {
+                closeLogModal();
+            }
+        }
+
+        // Dark mode
+        function toggleDarkMode() {
+            isDarkMode = !isDarkMode;
+            if (isDarkMode) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+            }
+            localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
+        }
+        function loadDarkModePreference() {
+            if (isDarkMode) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+            }
+        }
+
+        // Chart modal for per-symbol chart
+        function openChartModal(symbol) {
+            // build simple modal dynamically
+            const modalId = 'chartSymbolModal';
+            let modal = document.getElementById(modalId);
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = 'modal';
+                modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3><i class="fas fa-chart-line"></i> Chart - <span id="chartSymbolName"></span></h3>
+                        <button class="btn-close" id="closeChartModal">&times;</button>
+                    </div>
+                    <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
+                        <label>Scanner:</label>
+                        <select id="chartScannerSelect" class="form-select">
+                            <option value="rsi">RSI</option>
+                            <option value="ema" selected>EMA</option>
+                            <option value="dma">DMA</option>
+                        </select>
+                        <label>Type:</label>
+                        <select id="chartTypeSelectLocal" class="form-select">
+                            <option value="line" selected>Line</option>
+                            <option value="candlestick">Candlestick</option>
+                        </select>
+                        <button class="btn btn-secondary" id="reloadChartBtn"><i class="fas fa-sync"></i> Reload</button>
+                    </div>
+                    <div style="height:420px;">
+                        <canvas id="symbolChartCanvas"></canvas>
+                    </div>
+                </div>`;
+                document.body.appendChild(modal);
+                document.getElementById('closeChartModal').onclick = () => modal.style.display = 'none';
+                window.addEventListener('click', (e) => { if (e.target === modal) modal.style.display='none'; });
+            }
+            document.getElementById('chartSymbolName').textContent = symbol;
+            modal.style.display = 'block';
+            const load = async () => {
+                const scannerType = document.getElementById('chartScannerSelect').value;
+                const chartType = document.getElementById('chartTypeSelectLocal').value;
+                await loadSymbolChart(scannerType, symbol, chartType);
+            };
+            document.getElementById('chartScannerSelect').onchange = load;
+            document.getElementById('chartTypeSelectLocal').onchange = load;
+            const reload = document.getElementById('reloadChartBtn');
+            reload.onclick = load;
+            load();
+        }
+        async function loadSymbolChart(scannerType, symbol, chartType) {
+            try {
+                const res = await fetch(`/api/chart-data/${scannerType}/${symbol}`);
+                const data = await res.json();
+                if (data.error || !data.chartData) { toastr.error(data.error || 'No chart data'); return; }
+                const ctx = document.getElementById('symbolChartCanvas').getContext('2d');
+                if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+                const textColor = isDarkMode ? '#f9fafb' : '#374151';
+                const gridColor = isDarkMode ? '#4b5563' : '#e5e7eb';
+                const datasets = [];
+                const cd = data.chartData;
+                if (chartType === 'candlestick' && typeof Chart !== 'undefined' && Chart.controllers && Chart.controllers.candlestick) {
+                    const ohlc = cd.datasets.find(d => d.label==='OHLC');
+                    if (ohlc) {
+                        const mapped = ohlc.data.map((arr, i) => ({ x: i, o: arr[0], h: arr[1], l: arr[2], c: arr[3] }));
+                        datasets.push({ label:'Candlestick', data: mapped, type:'candlestick', color:{up:'rgb(34,197,94)',down:'rgb(239,68,68)',unchanged:'#60a5fa'}, borderColor:{up:'rgb(34,197,94)',down:'rgb(239,68,68)',unchanged:'#60a5fa'} });
+                    }
+                    cd.datasets.filter(ds => ds.label!=='OHLC').forEach(ds => {
+                        datasets.push({ ...ds, data: ds.data.map((y,i)=>({x:i,y})), type:'line', borderWidth:1, pointRadius:0, yAxisID: ds.label.includes('RSI')?'y1':'y' });
+                    });
+                } else {
+                    cd.datasets.filter(ds => ds.label!=='OHLC').forEach(ds => {
+                        datasets.push({ ...ds, type:'line' });
+                    });
+                }
+                chartInstance = new Chart(ctx, {
+                    type: (chartType==='candlestick' && typeof Chart !== 'undefined' && Chart.controllers && Chart.controllers.candlestick) ? 'candlestick' : 'line',
+                    data: { labels: cd.labels, datasets },
+                    options: {
+                        responsive:true, maintainAspectRatio:false,
+                        scales: {
+                            x: { type: chartType==='candlestick' ? 'linear' : 'category', ticks:{ color:textColor }, grid:{ color:gridColor } },
+                            y: { ticks:{ color:textColor }, grid:{ color:gridColor } },
+                            y1: { position:'right', grid:{ drawOnChartArea:false, color:gridColor }, ticks:{ color:textColor, min:0, max:100 } }
+                        },
+                        plugins: { legend: { labels: { color:textColor } } }
+                    }
+                });
+            } catch (e) { toastr.error('Failed to load chart'); }
+        }
+    </script>
+</body>
+</html>
