@@ -420,20 +420,17 @@ def run_dma_scanner():
     logger.info(f"Loading config from: {config_path}")
 
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         logger.info("Config loaded successfully")
     except FileNotFoundError:
-        logger.warning("Config file not found. Using default parameters.")
-        # Default configuration when no config file exists
-        config = {
-            "dma_periods": [10, 20, 50],
-            "base_timeframe": "1hour",
-            "days_to_list": 2,
-            "days_fallback_threshold": 1600,
-            "displacement": 1
-        }
-        logger.info("Using built-in defaults")
+        logger.error("Config file not found: dma_config.json - strict config enforcement requires this file")
+        return {"status": "error", "error": "Config file not found: dma_config.json"}
+
+    # Enforce presence of dma_periods in config
+    if 'dma_periods' not in config or not config.get('dma_periods'):
+        logger.error('dma_config.json must include a non-empty "dma_periods" list')
+        return {"status": "error", "error": 'Missing dma_periods in dma_config.json'}
 
     # Load centralized symbols if not present in config (for standalone execution)
     if 'symbols' not in config:
@@ -448,6 +445,7 @@ def run_dma_scanner():
             logger.warning("Centralized symbols file not found, using default symbol")
     else:
         symbols = config['symbols']
+    # Use periods strictly from config
     dma_periods = config['dma_periods']
     base_timeframe = config.get('base_timeframe', '15mins')
     days_to_list = config.get('days_to_list', 2)

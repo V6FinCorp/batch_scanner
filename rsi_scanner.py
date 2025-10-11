@@ -314,18 +314,13 @@ def run_rsi_scanner():
             config = json.load(f)
         print("Config loaded successfully")
     except FileNotFoundError:
-        print("Config file not found. Using default parameters.")
-        # Default configuration when no config file exists
-        config = {
-            "days_fallback_threshold": 200,
-            "rsi_periods": [15, 30, 60],
-            "base_timeframe": "15mins",
-            "default_timeframe": "15mins",
-            "days_to_list": 2,
-            "rsi_overbought": 70,
-            "rsi_oversold": 30
-        }
-        print("Using built-in defaults")
+        print("Config file not found: rsi_config.json - strict config enforcement requires this file")
+        return
+
+    # Enforce presence of rsi_periods in config
+    if 'rsi_periods' not in config or not config.get('rsi_periods'):
+        print('rsi_config.json must include a non-empty "rsi_periods" list')
+        return
 
     # Load centralized symbols if not present in config (for standalone execution)
     if 'symbols' not in config:
@@ -340,6 +335,7 @@ def run_rsi_scanner():
             print("Centralized symbols file not found, using default symbol")
     else:
         symbols = config['symbols']
+    # Use RSI periods strictly from config
     rsi_periods = config['rsi_periods']
     base_timeframe = config.get('base_timeframe', '15mins')
     days_to_list = config.get('days_to_list', 2)

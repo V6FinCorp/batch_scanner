@@ -292,15 +292,13 @@ def run_ema_scanner():
             config = json.load(f)
         print("Config loaded successfully")
     except FileNotFoundError:
-        print("Config file not found. Using default parameters.")
-        # Default configuration when no config file exists
-        config = {
-            "ema_periods": [9, 15, 65, 200],
-            "base_timeframe": "15mins",
-            "days_to_list": 2,
-            "days_fallback_threshold": 200
-        }
-        print("Using built-in defaults")
+        print("Config file not found: ema_config.json - strict config enforcement requires this file")
+        return
+
+    # Enforce presence of ema_periods in config
+    if 'ema_periods' not in config or not config.get('ema_periods'):
+        print('ema_config.json must include a non-empty "ema_periods" list')
+        return
 
     # Load centralized symbols if not present in config (for standalone execution)
     if 'symbols' not in config:
@@ -315,6 +313,7 @@ def run_ema_scanner():
             print("Centralized symbols file not found, using default symbol")
     else:
         symbols = config['symbols']
+    # Use EMA periods strictly from config
     ema_periods = config['ema_periods']
     base_timeframe = config.get('base_timeframe', '15mins')
     days_to_list = config.get('days_to_list', 2)

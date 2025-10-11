@@ -112,22 +112,11 @@ class ScannerManager:
             return self.report_error("validation", f"Invalid days_to_list: {days_to_list}",
                                   {"value": days_to_list})
         
-        # Scanner-specific validation
-        if scanner_type == 'rsi':
-            rsi_periods = kwargs.get('rsiPeriods', [])
-            if not rsi_periods:
-                return self.report_error("validation", "No RSI periods provided",
-                                      {"rsiPeriods": rsi_periods})
-        elif scanner_type == 'ema':
-            ema_periods = kwargs.get('emaPeriods', [])
-            if not ema_periods:
-                return self.report_error("validation", "No EMA periods provided",
-                                      {"emaPeriods": ema_periods})
-        elif scanner_type == 'dma':
-            dma_periods = kwargs.get('dmaPeriods', [])
-            if not dma_periods:
-                return self.report_error("validation", "No DMA periods provided",
-                                      {"dmaPeriods": dma_periods})
+    # Scanner-specific validation
+    # Note: Period lists are authoritative on-disk (config files). We do not require
+    # the UI or callers to provide period arrays in kwargs. The run_scanner method
+    # will load and validate period lists from the scanner config files and fail-fast
+    # if missing. This keeps validate_config focused on structural validation only.
         
         # If all validation passes
         return {"valid": True}
@@ -138,7 +127,12 @@ class ScannerManager:
             # Ensure lock exists (defensive)
             if not hasattr(self, '_lock'):
                 self._lock = threading.Lock()
-            # For DMA, enforce timeframe from its own config regardless of incoming value
+            # For DMA: prefer the incoming/requested base_timeframe so DMA aligns with the
+            # OHLC timeframe used by the UI/chart. Previously this code always overrode
+            # the caller's timeframe with the on-disk dma_config.json value which caused
+            # DMA to be computed on a different timeframe (e.g. daily) and misalign with
+            # intraday chart data. We keep the ability to read the on-disk value for
+            # informational logging only, but will use the caller's timeframe by default.
             enforced_base_timeframe = base_timeframe
             if scanner_type == 'dma':
                 try:
@@ -146,91 +140,81 @@ class ScannerManager:
                     if os.path.exists(dma_cfg_path):
                         with open(dma_cfg_path, 'r') as f:
                             dma_cfg = json.load(f)
-                        enforced_base_timeframe = dma_cfg.get('base_timeframe', base_timeframe)
-                    else:
-                        enforced_base_timeframe = base_timeframe
+                        disk_tf = dma_cfg.get('base_timeframe')
+                        # Log if on-disk differs from requested so operators know an override happened
+                        if disk_tf and disk_tf != enforced_base_timeframe:
+                            logger.info(f"DMA config base_timeframe on-disk '{disk_tf}' differs from requested '{enforced_base_timeframe}'; using requested timeframe to align DMA with OHLC charts")
                 except Exception:
-                    enforced_base_timeframe = base_timeframe
+                    # If any error reading disk config occurs, just continue and use requested timeframe
+                    pass
             
-            # Validate inputs (use enforced timeframe for DMA)
+            # Load scanner config from disk and enforce its period lists (fail-fast if missing)
+            centralized_symbols = self.load_centralized_symbols()
+
+            if scanner_type == 'rsi':
+                config_file = os.path.join(self.scanners_dir, 'config', 'rsi_config.json')
+            elif scanner_type == 'ema':
+                config_file = os.path.join(self.scanners_dir, 'config', 'ema_config.json')
+            elif scanner_type == 'dma':
+                config_file = os.path.join(self.scanners_dir, 'config', 'dma_config.json')
+            else:
+                return self.report_error("validation", f"Invalid scanner type: {scanner_type}",
+                                    {"valid_types": ['rsi', 'ema', 'dma']})
+
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    base_config = json.load(f)
+            except FileNotFoundError:
+                base_config = {}
+
+            # Fail fast if the required periods list is missing or empty in the config
+            if scanner_type == 'rsi':
+                if not base_config.get('rsi_periods'):
+                    return self.report_error('configuration', 'Missing or empty "rsi_periods" in rsi_config.json', {'config': config_file})
+            elif scanner_type == 'ema':
+                if not base_config.get('ema_periods'):
+                    return self.report_error('configuration', 'Missing or empty "ema_periods" in ema_config.json', {'config': config_file})
+            elif scanner_type == 'dma':
+                if not base_config.get('dma_periods'):
+                    return self.report_error('configuration', 'Missing or empty "dma_periods" in dma_config.json', {'config': config_file})
+
+            # Validate inputs now (timeframe already enforced for DMA)
             validation_result = self.validate_config(scanner_type, symbols, enforced_base_timeframe, days_to_list, **kwargs)
             if "valid" not in validation_result:
                 return validation_result
-                
+
             logger.info(f"Running {scanner_type} scanner for {symbols} ({enforced_base_timeframe}, {days_to_list} days)")
-            
-            # Load existing config file and merge with form values (without overwriting the config file)
-            # Always use centralized symbols instead of symbols from individual config files
-            centralized_symbols = self.load_centralized_symbols()
-            
+
+            # Build runtime config_data strictly from base_config for period lists; allow other fields from config or kwargs
+            final_symbols = symbols if symbols else centralized_symbols
             if scanner_type == 'rsi':
-                config_file = os.path.join(self.scanners_dir, 'config', 'rsi_config.json')
-                
-                # Load existing config as base
-                try:
-                    with open(config_file, 'r') as f:
-                        base_config = json.load(f)
-                        logger.debug(f"Loaded base RSI config: {base_config}")
-                except FileNotFoundError:
-                    logger.warning(f"Config file not found: {config_file}, using empty base config")
-                    base_config = {}
-                
-                # Create runtime config (merge base with form values, form values take precedence)
-                # Use provided symbols if any, otherwise use centralized symbols
-                final_symbols = symbols if symbols else centralized_symbols
                 config_data = {
-                    "symbols": final_symbols,
-                    "days_fallback_threshold": kwargs.get('daysFallbackThreshold', base_config.get('days_fallback_threshold', 200)),
-                    "rsi_periods": kwargs.get('rsiPeriods', base_config.get('rsi_periods', [15, 30, 60])),
-                    "rsi_overbought": kwargs.get('rsiOverbought', base_config.get('rsi_overbought', 70)),
-                    "rsi_oversold": kwargs.get('rsiOversold', base_config.get('rsi_oversold', 30)),
-                    "base_timeframe": base_timeframe,
-                    "default_timeframe": base_timeframe,
-                    "days_to_list": days_to_list
+                    'symbols': final_symbols,
+                    'rsi_periods': base_config.get('rsi_periods'),
+                    'days_fallback_threshold': base_config.get('days_fallback_threshold', kwargs.get('daysFallbackThreshold', 200)),
+                    'rsi_overbought': base_config.get('rsi_overbought', kwargs.get('rsiOverbought', 70)),
+                    'rsi_oversold': base_config.get('rsi_oversold', kwargs.get('rsiOversold', 30)),
+                    'base_timeframe': base_timeframe,
+                    'default_timeframe': base_timeframe,
+                    'days_to_list': days_to_list
                 }
             elif scanner_type == 'ema':
-                config_file = os.path.join(self.scanners_dir, 'config', 'ema_config.json')
-                
-                # Load existing config as base
-                try:
-                    with open(config_file, 'r') as f:
-                        base_config = json.load(f)
-                        logger.debug(f"Loaded base EMA config: {base_config}")
-                except FileNotFoundError:
-                    logger.warning(f"Config file not found: {config_file}, using empty base config")
-                    base_config = {}
-                
-                # Create runtime config (merge base with form values, form values take precedence)
-                # Use provided symbols if any, otherwise use centralized symbols
-                final_symbols = symbols if symbols else centralized_symbols
                 config_data = {
-                    "symbols": final_symbols,
-                    "ema_periods": kwargs.get('emaPeriods', base_config.get('ema_periods', [9, 15, 65, 200])),
-                    "base_timeframe": base_timeframe,
-                    "days_to_list": days_to_list,
-                    "days_fallback_threshold": kwargs.get('daysFallbackThreshold', base_config.get('days_fallback_threshold', 200))
+                    'symbols': final_symbols,
+                    'ema_periods': base_config.get('ema_periods'),
+                    'base_timeframe': base_timeframe,
+                    'days_to_list': days_to_list,
+                    'days_fallback_threshold': base_config.get('days_fallback_threshold', kwargs.get('daysFallbackThreshold', 200))
                 }
             elif scanner_type == 'dma':
-                config_file = os.path.join(self.scanners_dir, 'config', 'dma_config.json')
-                
-                # Load existing config as base
-                try:
-                    with open(config_file, 'r') as f:
-                        base_config = json.load(f)
-                        logger.debug(f"Loaded base DMA config: {base_config}")
-                except FileNotFoundError:
-                    logger.warning(f"Config file not found: {config_file}, using empty base config")
-                    base_config = {}
-                
-                # Create runtime config (DMA timeframe stays constant as per its config)
-                # Use provided symbols if any, otherwise use centralized symbols
-                final_symbols = symbols if symbols else centralized_symbols
+                # Use the enforced_base_timeframe (which now prefers the incoming/requested timeframe)
                 config_data = {
-                    "symbols": final_symbols,
-                    "dma_periods": kwargs.get('dmaPeriods', base_config.get('dma_periods', [10, 20, 50])),
-                    "base_timeframe": base_config.get('base_timeframe', enforced_base_timeframe),
-                    "days_to_list": days_to_list,
-                    "days_fallback_threshold": kwargs.get('daysFallbackThreshold', base_config.get('days_fallback_threshold', 200))
+                    'symbols': final_symbols,
+                    'dma_periods': base_config.get('dma_periods'),
+                    'base_timeframe': enforced_base_timeframe,
+                    'days_to_list': days_to_list,
+                    'days_fallback_threshold': base_config.get('days_fallback_threshold', kwargs.get('daysFallbackThreshold', 200)),
+                    'displacement': base_config.get('displacement', kwargs.get('displacement', 1))
                 }
             else:
                 return self.report_error("validation", f"Invalid scanner type: {scanner_type}",
@@ -362,6 +346,74 @@ class ScannerManager:
                             try:
                                 df = pd.read_csv(csv_file)
                                 logger.info(f"{symbol}: CSV loaded with {len(df)} rows")
+
+                                # --- Sanitize indicator columns to match authoritative on-disk config ---
+                                try:
+                                    # Build allowed indicator column names from base_config
+                                    allowed_cols = set(['timestamp', 'open', 'high', 'low', 'close', 'volume', 'Symbol', 'CMP', 'Change%', 'Time'])
+                                    if scanner_type == 'rsi':
+                                        for p in base_config.get('rsi_periods', []):
+                                            allowed_cols.add(f'rsi_{p}')
+                                            allowed_cols.add(f'RSI{p}')
+                                    elif scanner_type == 'ema':
+                                        for p in base_config.get('ema_periods', []):
+                                            allowed_cols.add(f'ema_{p}')
+                                            allowed_cols.add(f'EMA{p}')
+                                    elif scanner_type == 'dma':
+                                        for p in base_config.get('dma_periods', []):
+                                            allowed_cols.add(f'dma_{p}')
+                                            allowed_cols.add(f'DMA{p}')
+
+                                    existing_cols = set(df.columns)
+
+                                    # Columns that are configured but missing from CSV
+                                    missing_configured = []
+                                    if scanner_type == 'rsi':
+                                        for p in base_config.get('rsi_periods', []):
+                                            if f'rsi_{p}' not in existing_cols and f'RSI{p}' not in existing_cols:
+                                                missing_configured.append(p)
+                                    elif scanner_type == 'ema':
+                                        for p in base_config.get('ema_periods', []):
+                                            if f'ema_{p}' not in existing_cols and f'EMA{p}' not in existing_cols:
+                                                missing_configured.append(p)
+                                    elif scanner_type == 'dma':
+                                        for p in base_config.get('dma_periods', []):
+                                            if f'dma_{p}' not in existing_cols and f'DMA{p}' not in existing_cols:
+                                                missing_configured.append(p)
+
+                                    # Drop any indicator columns that are not in allowed_cols to avoid showing stale indicators
+                                    cols_to_drop = [c for c in df.columns if c not in allowed_cols and (c.lower().startswith('rsi_') or c.lower().startswith('ema_') or c.lower().startswith('dma_') or c.upper().startswith('RSI') or c.upper().startswith('EMA') or c.upper().startswith('DMA'))]
+                                    if cols_to_drop:
+                                        logger.info(f"Dropping stale indicator columns from {csv_file}: {cols_to_drop}")
+                                        df = df.drop(columns=cols_to_drop)
+
+                                    # Add missing configured indicator columns with None so UI shows them as unavailable (N/A)
+                                    for p in missing_configured:
+                                        col_name = None
+                                        if scanner_type == 'rsi':
+                                            col_name = f'rsi_{p}'
+                                        elif scanner_type == 'ema':
+                                            col_name = f'ema_{p}'
+                                        elif scanner_type == 'dma':
+                                            col_name = f'dma_{p}'
+                                        if col_name and col_name not in df.columns:
+                                            df[col_name] = None
+
+                                    # Record a warning to include in response_data if discrepancies found
+                                    if missing_configured or cols_to_drop:
+                                        note = ''
+                                        if missing_configured:
+                                            note += f"Missing configured periods: {missing_configured}. "
+                                        if cols_to_drop:
+                                            note += f"Dropped stale CSV columns: {cols_to_drop}."
+                                        # Try to attach to response_data if available, else stash on dataframe
+                                        try:
+                                            response_data.setdefault('warnings', []).append(note)
+                                        except Exception:
+                                            df._sanitization_warning = note
+                                except Exception as ex:
+                                    logger.exception(f"Error sanitizing CSV columns for {csv_file}: {ex}")
+                                # --- end sanitization ---
 
                                 # Clean values for JSON compatibility
                                 df = df.replace(['N/A', 'NaN', 'nan'], None)

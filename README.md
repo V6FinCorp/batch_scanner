@@ -151,6 +151,13 @@ Each scanner has its own configuration file in `scanners/config/`, and all symbo
 }
 ```
 
+### How to change indicator periods
+
+- Indicator period lists are authoritative when defined in the scanner config files located in `batch_scanner/config/` (for example `ema_config.json`, `rsi_config.json`, `dma_config.json`).
+- To change the periods the scanners use, edit the corresponding JSON array (`ema_periods`, `rsi_periods`, or `dma_periods`) and save the file.
+- After editing a config file, re-run the scanner from the dashboard or via the API. The orchestrator (`ScannerManager`) and individual scanner scripts read these files at runtime and will use the updated period lists.
+- The web UI displays the configured periods but does not allow changing them at runtime — the on-disk config files are the single source of truth.
+
 ## 🌐 API Endpoints
 
 ### Run Scanner

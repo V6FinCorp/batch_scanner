@@ -79,8 +79,7 @@
             padding: 2rem;
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            width: 80%;
-            max-width: 800px;
+            width: 90%;
             max-height: 80vh;
             overflow-y: auto;
         }
@@ -212,7 +211,7 @@
                     <div class="timeframe-selector">
                         <label>TimeFrame:</label>
                         <select id="timeframeSelect" class="form-select">
-                            <option value="5mins">5 mins</option>
+                                <option value="5mins">5 mins</option>
                             <option value="15mins" selected>15 mins</option>
                             <option value="30mins">30 mins</option>
                             <option value="1hour">1 hour</option>
@@ -223,7 +222,7 @@
                     <div id="filters" style="display:flex; gap:0.5rem; align-items:center;">
                         <label style="margin-right:0.25rem;">Reco:</label>
                         <label><input type="checkbox" id="filter_bull" checked/> Bull</label>
-                        <label><input type="checkbox" id="filter_neutral" checked/> Neutral</label>
+                            <label><input type="checkbox" id="filter_neutral" checked/> Neutral</label>
                         <label><input type="checkbox" id="filter_bear" checked/> Bear</label>
                         <label style="margin-left:0.5rem; margin-right:0.25rem;">EMA/DMA % range:</label>
                         <input type="number" id="filter_pct_min" placeholder="-5" style="width:70px" />
@@ -267,25 +266,7 @@
                 </div>
                 <div class="table-scroll">
                     <table id="symbolsTable" class="symbols-table">
-                        <thead>
-                            <tr>
-                                <th class="symbol-col" data-key="Symbol">Symbol</th>
-                                <th data-key="CMP">CMP</th>
-                                <th data-key="Reco">Reco</th>
-                                <th data-key="rsi_5">RSI(5)</th>
-                                <th data-key="rsi_15">RSI(15)</th>
-                                <th data-key="rsi_30">RSI(30)</th>
-                                <th data-key="ema_9">EMA(9)</th>
-                                <th data-key="ema_15">EMA(15)</th>
-                                <th data-key="ema_21">EMA(21)</th>
-                                <th data-key="dma_10">DMA(10)</th>
-                                <th data-key="dma_20">DMA(20)</th>
-                                <th data-key="dma_50">DMA(50)</th>
-                                <th data-key="dma_100">DMA(100)</th>
-                                <th data-key="dma_200">DMA(200)</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
+                        <thead id="symbolsTableHead"></thead>
                         <tbody id="symbolsTBody"></tbody>
                     </table>
                 </div>
@@ -338,6 +319,8 @@
     let showPctDiff = JSON.parse(localStorage.getItem('showPctDiff') || 'false');
     let isDarkMode = JSON.parse(localStorage.getItem('darkMode') || 'false');
     let chartInstance = null;
+    // Column index map for dynamic header columns
+    let colIndexMap = {};
         
         // Toastr configuration
         toastr.options = {
@@ -354,6 +337,8 @@
             updateStatusBar();
             setInterval(updateTime, 1000);
             
+            // Build the dynamic table header first so rows render into correct columns
+            await buildDynamicHeader();
             await loadSymbols();
             setupEventListeners();
             // init toggles
@@ -425,6 +410,58 @@
                     document.documentElement.style.setProperty('--group-header-height', '0px');
                 }
             } catch (e) { console.warn('computeHeaderOffset failed', e); }
+        }
+
+        // Build table header dynamically using configured periods from server
+        async function buildDynamicHeader() {
+            try {
+                // Attempt to fetch config for RSI/EMA/DMA; fall back to sensible defaults
+                const rsiRes = await fetch('/api/config/rsi');
+                const emaRes = await fetch('/api/config/ema');
+                const dmaRes = await fetch('/api/config/dma');
+                const rsiCfg = rsiRes.ok ? await rsiRes.json() : {};
+                const emaCfg = emaRes.ok ? await emaRes.json() : {};
+                const dmaCfg = dmaRes.ok ? await dmaRes.json() : {};
+
+                const rsi_periods = (rsiCfg && rsiCfg.rsi_periods) || [5,15,30];
+                const ema_periods = (emaCfg && emaCfg.ema_periods) || [9,15];
+                const dma_periods = (dmaCfg && dmaCfg.dma_periods) || [10,20,50,100,200];
+
+                const thead = document.getElementById('symbolsTableHead');
+                thead.innerHTML = '';
+                const tr = document.createElement('tr');
+                // base columns
+                const baseCols = [ {k:'Symbol', t:'Symbol', cls:'symbol-col'}, {k:'CMP', t:'CMP'}, {k:'Reco', t:'Reco'} ];
+                let idx = 0;
+                colIndexMap = {};
+                baseCols.forEach(c => { const th = document.createElement('th'); if (c.cls) th.className = c.cls; th.setAttribute('data-key', c.k); th.textContent = c.t; tr.appendChild(th); colIndexMap[c.k] = idx++; });
+
+                // RSI columns
+                for (const p of rsi_periods) {
+                    const key = `rsi_${p}`;
+                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `RSI(${p})`; tr.appendChild(th); colIndexMap[key] = idx++;
+                }
+
+                // EMA columns
+                for (const p of ema_periods) {
+                    const key = `ema_${p}`;
+                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `EMA(${p})`; tr.appendChild(th); colIndexMap[key] = idx++;
+                }
+
+                // DMA columns
+                for (const p of dma_periods) {
+                    const key = `dma_${p}`;
+                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `DMA(${p})`; tr.appendChild(th); colIndexMap[key] = idx++;
+                }
+
+                // Actions
+                const thActions = document.createElement('th'); thActions.textContent = 'Actions'; tr.appendChild(thActions); colIndexMap['Actions'] = idx++;
+
+                thead.appendChild(tr);
+
+            } catch (e) {
+                console.warn('Failed to build dynamic header, falling back to static header', e);
+            }
         }
 
         // Update offsets on resize and when content/layout changes
@@ -712,19 +749,17 @@
             if (!isNaN(cmpNum)) cmpCell.setAttribute('data-cmp', String(cmpNum));
             tr.appendChild(cmpCell);
             tr.appendChild(td(reco(), 'reco-cell'));
-            tr.appendChild(td(colorRsiHtml(getCellVal('rsi_5'))));
-            tr.appendChild(td(colorRsiHtml(getCellVal('rsi_15'))));
-            tr.appendChild(td(colorRsiHtml(getCellVal('rsi_30'))));
+            // Render RSI columns dynamically if present in colIndexMap
+            const rsiKeys = Object.keys(colIndexMap).filter(k => k.startsWith('rsi_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+            rsiKeys.forEach(k => tr.appendChild(td(colorRsiHtml(getCellVal(k)))));
             // Use numeric CMP when available (clean any currency/formatting). Pass numeric CMP into helpers
             const cmpVal = !isNaN(cmpNum) ? cmpNum : NaN;
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('ema_9'), cmpVal) : colorCompareHtml(getCellVal('ema_9'), cmpVal)));
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('ema_15'), cmpVal) : colorCompareHtml(getCellVal('ema_15'), cmpVal)));
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('ema_21'), cmpVal) : colorCompareHtml(getCellVal('ema_21'), cmpVal)));
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_10'), cmpVal) : colorCompareHtml(getCellVal('dma_10'), cmpVal)));
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_20'), cmpVal) : colorCompareHtml(getCellVal('dma_20'), cmpVal)));
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_50'), cmpVal) : colorCompareHtml(getCellVal('dma_50'), cmpVal)));
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_100'), cmpVal) : colorCompareHtml(getCellVal('dma_100'), cmpVal)));
-            tr.appendChild(td(showPctDiff ? pct(getCellVal('dma_200'), cmpVal) : colorCompareHtml(getCellVal('dma_200'), cmpVal)));
+            // Render EMA columns dynamically
+            const emaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('ema_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+            emaKeys.forEach(k => tr.appendChild(td(showPctDiff ? pct(getCellVal(k), cmpVal) : colorCompareHtml(getCellVal(k), cmpVal))));
+            // Render DMA columns dynamically
+            const dmaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+            dmaKeys.forEach(k => tr.appendChild(td(showPctDiff ? pct(getCellVal(k), cmpVal) : colorCompareHtml(getCellVal(k), cmpVal))));
             // LastUpdate column removed to match legacy compact table
 
             // Actions with per-scanner controls and status badges (reuse chip/time ids)
@@ -741,9 +776,13 @@
             // /api/symbol-table doesn't include those keys yet.
             (function(symbolObj, rowId){
                 const has = (k) => symbolObj && symbolObj[k] !== undefined && symbolObj[k] !== null && symbolObj[k] !== '';
-                const needsRsi = !has('rsi_5') || !has('rsi_15');
-                const needsEma = !has('ema_9') || !has('ema_15') || !has('ema_21');
-                const needsDma = !has('dma_10') || !has('dma_20') || !has('dma_50') || !has('dma_100') || !has('dma_200');
+                // Determine required keys dynamically from colIndexMap
+                const requiredRsi = Object.keys(colIndexMap).filter(k=>k.startsWith('rsi_'));
+                const requiredEma = Object.keys(colIndexMap).filter(k=>k.startsWith('ema_'));
+                const requiredDma = Object.keys(colIndexMap).filter(k=>k.startsWith('dma_'));
+                const needsRsi = requiredRsi.some(k => !has(k));
+                const needsEma = requiredEma.some(k => !has(k));
+                const needsDma = requiredDma.some(k => !has(k));
                 if (needsRsi || needsEma || needsDma) {
                     // small stagger to avoid bursting requests on large symbol lists
                     setTimeout(() => {
@@ -1083,13 +1122,8 @@
                 };
                 const fmt = (v) => (v===null||v===undefined||v==='')?'-':Number(v).toFixed(2);
                 const cells = row.querySelectorAll('td');
-                // Column indices based on new header order:
-                // Symbol(0), CMP(1), Reco(2), RSI5(3), RSI15(4), RSI30(5), EMA9(6), EMA15(7), EMA21(8), DMA10(9), DMA20(10), DMA50(11), DMA100(12), DMA200(13), Actions(14)
-                const colIndex = {
-                    'rsi_5':3,'rsi_15':4,'rsi_30':5,
-                    'ema_9':6,'ema_15':7,'ema_21':8,
-                    'dma_10':9,'dma_20':10,'dma_50':11,'dma_100':12,'dma_200':13
-                };
+                // Use dynamic colIndexMap built by header builder
+                const colIndex = colIndexMap || {};
                 for (const key of map[scanner]) {
                     // accept alternate key names returned by older APIs
                     const alternates = [key];
@@ -1100,7 +1134,7 @@
                     // find first available data key in payload
                     let dataKey = alternates.find(k => (k in d && d[k] !== undefined && d[k] !== null));
                     if (!dataKey) dataKey = (key in d) ? key : null;
-                    if (dataKey && colIndex[key] !== undefined) {
+                    if (dataKey && colIndex && colIndex[key] !== undefined) {
                         if (showPctDiff && (key.startsWith('ema_') || key.startsWith('dma_'))) {
                             // Prefer numeric CMP stored on the cell via data-cmp
                             const cmpAttr = cells[1]?.getAttribute && cells[1].getAttribute('data-cmp');
@@ -1151,20 +1185,20 @@
                 }
                 // No LastUpdate column in compact view
                 // Update Reco cell (CMP is at col index 1)
-                const cmpVal = parseFloat(cells[1]?.innerText?.replace(/[^0-9.\-]/g,'') || '');
+                const cmpVal = parseFloat(cells[colIndex['CMP']]?.innerText?.replace(/[^0-9.\-]/g,'') || '');
                 const readVal = (cellOrKey, idx) => {
                     // Prefer data from API (d[key]) else from cell text, stripping % if present
                     const k = cellOrKey;
                     if (d && (k in d) && d[k] !== null && d[k] !== undefined) return parseFloat(d[k]);
-                    const txt = cells[idx]?.innerText || '';
-                    if (txt.includes('%')) return parseFloat(txt.replace('%','')) * 0.01 * cmpVal; // percent -> absolute
-                    return parseFloat(txt.replace(/[^0-9.\-]/g,''));
+                    const cellText = cells[idx]?.innerText || '';
+                    if (cellText.includes('%')) return parseFloat(cellText.replace('%','')) * 0.01 * cmpVal; // percent -> absolute
+                    return parseFloat(cellText.replace(/[^0-9.\-]/g,''));
                 };
-                const ema9 = readVal('ema_9', 6);
-                const ema15 = readVal('ema_15', 7);
-                const ema21 = readVal('ema_21', 8);
-                const dma200 = readVal('dma_200', 13);
-                const rsi15 = readVal('rsi_15', 4);
+                const ema9 = readVal('ema_9', colIndex['ema_9']);
+                const ema15 = readVal('ema_15', colIndex['ema_15']);
+                const ema21 = readVal('ema_21', colIndex['ema_21']);
+                const dma200 = readVal('dma_200', colIndex['dma_200']);
+                const rsi15 = readVal('rsi_15', colIndex['rsi_15']);
                 let recoCell = row.querySelector('.reco-cell');
                 if (recoCell) {
                     // Compute weighted score (same as initial render)
@@ -1324,22 +1358,21 @@
                         <h3><i class="fas fa-chart-line"></i> Chart - <span id="chartSymbolName"></span></h3>
                         <button class="btn-close" id="closeChartModal">&times;</button>
                     </div>
-                    <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
-                        <label>Scanner:</label>
-                        <select id="chartScannerSelect" class="form-select">
-                            <option value="rsi">RSI</option>
-                            <option value="ema" selected>EMA</option>
-                            <option value="dma">DMA</option>
-                        </select>
-                        <label>Type:</label>
-                        <select id="chartTypeSelectLocal" class="form-select">
-                            <option value="line" selected>Line</option>
-                            <option value="candlestick">Candlestick</option>
-                        </select>
+                    <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:0.5rem;">
+                        <label style="margin-right:6px">Scanners:</label>
+                        <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="modalEnableEMA" checked/> EMA</label>
+                        <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="modalEnableDMA" checked/> DMA</label>
+                        <span style="flex:1"></span>
                         <button class="btn btn-secondary" id="reloadChartBtn"><i class="fas fa-sync"></i> Reload</button>
                     </div>
-                    <div style="height:420px;">
-                        <canvas id="symbolChartCanvas"></canvas>
+                    <!-- Two stacked canvases: price (top) and RSI (bottom) -->
+                    <div style="display:flex; flex-direction:column; gap:0.5rem;">
+                        <div style="height:260px;">
+                            <canvas id="symbolPriceCanvas"></canvas>
+                        </div>
+                        <div style="height:160px;">
+                            <canvas id="symbolRSICanvas"></canvas>
+                        </div>
                     </div>
                 </div>`;
                 document.body.appendChild(modal);
@@ -1349,54 +1382,352 @@
             document.getElementById('chartSymbolName').textContent = symbol;
             modal.style.display = 'block';
             const load = async () => {
-                const scannerType = document.getElementById('chartScannerSelect').value;
-                const chartType = document.getElementById('chartTypeSelectLocal').value;
-                await loadSymbolChart(scannerType, symbol, chartType);
+                const enableEMA = document.getElementById('modalEnableEMA')?.checked ?? true;
+                const enableDMA = document.getElementById('modalEnableDMA')?.checked ?? true;
+                await loadSymbolChart(symbol, { enableEMA, enableDMA });
             };
-            document.getElementById('chartScannerSelect').onchange = load;
-            document.getElementById('chartTypeSelectLocal').onchange = load;
-            const reload = document.getElementById('reloadChartBtn');
-            reload.onclick = load;
+            // Wire checkbox toggles
+            const emaCb = document.getElementById('modalEnableEMA'); if (emaCb) emaCb.onchange = load;
+            const dmaCb = document.getElementById('modalEnableDMA'); if (dmaCb) dmaCb.onchange = load;
+            const reload = document.getElementById('reloadChartBtn'); if (reload) reload.onclick = load;
             load();
         }
-        async function loadSymbolChart(scannerType, symbol, chartType) {
+    async function loadSymbolChart(symbol, options = { enableEMA: true, enableDMA: true }) {
             try {
-                const res = await fetch(`/api/chart-data/${scannerType}/${symbol}`);
-                const data = await res.json();
-                if (data.error || !data.chartData) { toastr.error(data.error || 'No chart data'); return; }
-                const ctx = document.getElementById('symbolChartCanvas').getContext('2d');
-                if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-                const textColor = isDarkMode ? '#f9fafb' : '#374151';
-                const gridColor = isDarkMode ? '#4b5563' : '#e5e7eb';
-                const datasets = [];
-                const cd = data.chartData;
-                if (chartType === 'candlestick' && typeof Chart !== 'undefined' && Chart.controllers && Chart.controllers.candlestick) {
-                    const ohlc = cd.datasets.find(d => d.label==='OHLC');
-                    if (ohlc) {
-                        const mapped = ohlc.data.map((arr, i) => ({ x: i, o: arr[0], h: arr[1], l: arr[2], c: arr[3] }));
-                        datasets.push({ label:'Candlestick', data: mapped, type:'candlestick', color:{up:'rgb(34,197,94)',down:'rgb(239,68,68)',unchanged:'#60a5fa'}, borderColor:{up:'rgb(34,197,94)',down:'rgb(239,68,68)',unchanged:'#60a5fa'} });
+                    // Fetch chart data for all scanners (rsi, ema, dma) and merge into a single combined chartData
+                    const scannersToFetch = ['rsi','ema','dma'];
+                    const fetches = await Promise.all(scannersToFetch.map(s =>
+                        fetch(`/api/chart-data/${s}/${symbol}`).then(r => r.ok ? r.json() : { error: `HTTP ${r.status}` }).catch(e => ({ error: e.message }))
+                    ));
+
+                    // Build combined chartData
+                    const combined = { labels: null, datasets: [] };
+                    const seenLabels = new Set();
+                    for (const resp of fetches) {
+                        if (!resp || resp.error || !resp.chartData) continue;
+                        const part = resp.chartData;
+                        if (!combined.labels && Array.isArray(part.labels)) combined.labels = part.labels.slice();
+                        if (Array.isArray(part.datasets)) {
+                            for (const ds of part.datasets) {
+                                // Avoid duplicate dataset labels
+                                const label = (ds && ds.label) ? ds.label : JSON.stringify(ds);
+                                if (seenLabels.has(label)) continue;
+                                seenLabels.add(label);
+                                // Clone dataset to avoid mutations
+                                const copy = Object.assign({}, ds);
+                                // Ensure data arrays are copied
+                                if (Array.isArray(ds.data)) copy.data = ds.data.slice();
+                                combined.datasets.push(copy);
+                            }
+                        }
                     }
-                    cd.datasets.filter(ds => ds.label!=='OHLC').forEach(ds => {
-                        datasets.push({ ...ds, data: ds.data.map((y,i)=>({x:i,y})), type:'line', borderWidth:1, pointRadius:0, yAxisID: ds.label.includes('RSI')?'y1':'y' });
-                    });
-                } else {
-                    cd.datasets.filter(ds => ds.label!=='OHLC').forEach(ds => {
-                        datasets.push({ ...ds, type:'line' });
-                    });
-                }
-                chartInstance = new Chart(ctx, {
-                    type: (chartType==='candlestick' && typeof Chart !== 'undefined' && Chart.controllers && Chart.controllers.candlestick) ? 'candlestick' : 'line',
-                    data: { labels: cd.labels, datasets },
-                    options: {
-                        responsive:true, maintainAspectRatio:false,
-                        scales: {
-                            x: { type: chartType==='candlestick' ? 'linear' : 'category', ticks:{ color:textColor }, grid:{ color:gridColor } },
-                            y: { ticks:{ color:textColor }, grid:{ color:gridColor } },
-                            y1: { position:'right', grid:{ drawOnChartArea:false, color:gridColor }, ticks:{ color:textColor, min:0, max:100 } }
-                        },
-                        plugins: { legend: { labels: { color:textColor } } }
+
+                    if (!combined.labels || combined.datasets.length === 0) {
+                        toastr.error('No chart data available for this symbol');
+                        return;
                     }
-                });
+
+                    // Filter combined datasets according to options (enableEMA / enableDMA)
+                    const cd = { labels: combined.labels.slice(), datasets: [] };
+                    for (const ds of combined.datasets) {
+                        const lbl = (ds && ds.label) ? ds.label.toUpperCase() : '';
+                        if (/^EMA\(/.test(lbl) && !options.enableEMA) continue;
+                        if (/^DMA\(/.test(lbl) && !options.enableDMA) continue;
+                        cd.datasets.push(ds);
+                    }
+                    // Debugging: list merged datasets in console and show a small toast so user can verify
+                    try {
+                        const labelsList = cd.datasets.map(ds => ds.label || '<no-label>');
+                        console.log('[chart] combined labels count=', (cd.labels && cd.labels.length) || 0, 'datasets=', labelsList);
+                        if (window.toastr) toastr.info(`Combined chart built: ${labelsList.length} datasets`, 'Chart Debug');
+                        // Ensure non-OHLC datasets are set to 'line' so they render when mixed with candlestick
+                        for (const ds of cd.datasets) {
+                            const lbl = ds && ds.label ? ds.label : '<no-label>';
+                            if (!(lbl && lbl.toUpperCase() === 'OHLC')) {
+                                if (!ds.type) ds.type = 'line';
+                                // Coerce data values to numbers where appropriate (skip OHLC arrays)
+                                if (Array.isArray(ds.data) && ds.data.length > 0 && !(typeof ds.data[0] === 'object')) {
+                                    ds.data = ds.data.map(v => { const n = Number(v); return isNaN(n) ? null : n; });
+                                }
+                            }
+                        }
+                        // Detailed dump: label, type, data length and sample
+                        const detailed = cd.datasets.map(ds => ({ label: ds.label || '<no-label>', type: ds.type || '<none>', len: Array.isArray(ds.data) ? ds.data.length : 'na', sample: Array.isArray(ds.data) ? ds.data.slice(0,3) : ds.data }));
+                        console.log('[chart] combined detailed datasets ->', detailed);
+                    } catch (e) { /* ignore */ }
+
+                    // Destroy previous chart instances if present (use Chart.getChart to be robust)
+                    try {
+                        const pc = document.getElementById('symbolPriceCanvas');
+                        const existingPrice = (window.Chart && pc) ? Chart.getChart(pc) : null;
+                        if (existingPrice) { try { existingPrice.destroy(); } catch(e) { console.warn('Failed to destroy existing price chart', e); } }
+                    } catch(e) { console.warn('Error while destroying price chart', e); }
+                    try {
+                        const rc = document.getElementById('symbolRSICanvas');
+                        const existingRsi = (window.Chart && rc) ? Chart.getChart(rc) : null;
+                        if (existingRsi) { try { existingRsi.destroy(); } catch(e) { console.warn('Failed to destroy existing rsi chart', e); } }
+                    } catch(e) { console.warn('Error while destroying rsi chart', e); }
+
+                    const textColor = isDarkMode ? '#f9fafb' : '#374151';
+                    const gridColor = isDarkMode ? '#4b5563' : '#e5e7eb';
+
+                    // Combined view: top = price (candlestick + close) + EMA/DMA overlays; bottom = RSI series if present
+                    try {
+                        const priceCtx = document.getElementById('symbolPriceCanvas').getContext('2d');
+                        const rsiCanvasParent = document.getElementById('symbolRSICanvas').parentElement;
+
+                        const allDatasets = cd.datasets || [];
+                        const ohlc = allDatasets.find(d => d.label && d.label.toUpperCase() === 'OHLC');
+
+                        // Detect candlestick controller availability
+                        const candlestickAvailable = (typeof Chart !== 'undefined' && Chart.registry && !!Chart.registry.getController('candlestick'));
+
+                        const priceDatasets = [];
+                        if (ohlc && candlestickAvailable) {
+                            const mapped = ohlc.data.map((arr, i) => ({ x: i, o: arr[0], h: arr[1], l: arr[2], c: arr[3] }));
+                            priceDatasets.push({ label: 'OHLC', data: mapped, type: 'candlestick' });
+                        } else if (ohlc && !candlestickAvailable) {
+                            console.warn('Candlestick controller not available; falling back to close-price line');
+                        }
+
+                        // Close price dataset detection (fallback to first non-RSI numeric dataset)
+                        let closeDs = allDatasets.find(d => d.label && /close/i.test(d.label));
+                        if (!closeDs) closeDs = allDatasets.find(d => d.label && !/rsi|ohlc/i.test(d.label) && Array.isArray(d.data));
+                        if (closeDs) {
+                            priceDatasets.push({ label: closeDs.label || 'Close', data: closeDs.data, type: 'line', borderColor: 'rgb(229,237,243)', backgroundColor: 'rgba(59,130,246,0.08)', fill: false, pointRadius: 0, tension: 0.12 });
+                        }
+
+                        // Overlay EMA/DMA indicators if present
+                        const indicatorSets = allDatasets.filter(d => d.label && (/EMA/i.test(d.label) || /DMA/i.test(d.label) || /ema_/i.test(d.label) || /dma_/i.test(d.label)));
+                        const overlayColors = ['rgb(59,130,246)','rgb(16,185,129)','rgb(249,115,22)','rgb(14,165,233)','rgb(250,204,21)'];
+                        indicatorSets.forEach((d, i) => priceDatasets.push({ label: d.label, data: d.data, type: 'line', borderColor: overlayColors[i % overlayColors.length], backgroundColor: 'rgba(0,0,0,0)', fill: false, pointRadius: 0, tension: 0.12 }));
+
+                        // If OHLC candlesticks are present and plugin is used, convert numeric overlay datasets to {x,y}
+                        // points so they align with the candlestick objects and are rendered reliably.
+                        if (ohlc && candlestickAvailable) {
+                            priceDatasets.forEach(ds => {
+                                if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0 && typeof ds.data[0] !== 'object') {
+                                    ds.data = ds.data.map((v, i) => ({ x: i, y: (v === null || v === undefined) ? null : Number(v) }));
+                                    ds.parsing = false;
+                                    ds.order = 1; // draw above candlesticks
+                                    ds.borderWidth = ds.borderWidth || 2;
+                                    ds.spanGaps = true;
+                                }
+                            });
+                        } else {
+                            // Ensure overlays are visible for line-only top chart
+                            priceDatasets.forEach(ds => { if (ds && ds.type === 'line') { ds.order = ds.order || 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true; } });
+                        }
+
+                        // Build top chart (candlestick if available; otherwise line). Force category x-axis to avoid date adapter usage.
+                        const topType = (ohlc && candlestickAvailable) ? 'candlestick' : 'line';
+                        const topChart = new Chart(priceCtx, {
+                            type: topType,
+                            data: { labels: cd.labels, datasets: priceDatasets },
+                            options: {
+                                responsive: true, maintainAspectRatio: false,
+                                interaction: { mode: 'index', intersect: false },
+                                scales: { x: { type: 'category', ticks: { color: textColor }, grid: { color: gridColor } }, y: { ticks: { color: textColor }, grid: { color: gridColor } } },
+                                plugins: { legend: { labels: { color: textColor } } }
+                            }
+                        });
+                        document.getElementById('symbolPriceCanvas')._chart = topChart;
+                        document.getElementById('symbolPriceCanvas').parentElement.style.display = '';
+
+                        // --- Synchronization helpers (hover, wheel-zoom, drag-pan) ---
+                        // We synchronize by using category index indices for the x-axis (labels array indices).
+                        const priceCanvas = document.getElementById('symbolPriceCanvas');
+                        const rsiCanvas = document.getElementById('symbolRSICanvas');
+
+                        // Helper: set visible window (min/max index) for both charts
+                        function syncSetWindow(minIdx, maxIdx, sourceChart) {
+                            // clamp
+                            const maxLabelIndex = Math.max(0, cd.labels.length - 1);
+                            minIdx = Math.max(0, Math.min(minIdx, maxLabelIndex));
+                            maxIdx = Math.max(0, Math.min(maxIdx, maxLabelIndex));
+                            if (minIdx >= maxIdx) {
+                                // Ensure at least one label visible
+                                if (minIdx > 0) minIdx = minIdx - 1;
+                                else maxIdx = Math.min(minIdx + 1, maxLabelIndex);
+                            }
+                            [topChart, rsiChart].forEach(ch => {
+                                if (!ch) return;
+                                try {
+                                    ch.options.scales.x.min = minIdx;
+                                    ch.options.scales.x.max = maxIdx;
+                                    // update without animation for snappy sync
+                                    ch.update('none');
+                                } catch (e) { /* ignore */ }
+                            });
+                        }
+
+                        // Helper: get x-index under event for a chart using its x scale
+                        function getIndexForEvent(chart, evt) {
+                            try {
+                                const xScale = chart.scales.x;
+                                if (!xScale) return null;
+                                // event offsetX relative to canvas
+                                const rect = chart.canvas.getBoundingClientRect();
+                                const clientX = evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX);
+                                const px = clientX - rect.left;
+                                const value = xScale.getValueForPixel(px);
+                                if (value === undefined || value === null) return null;
+                                // value may be fractional - round to nearest label index
+                                return Math.round(Number(value));
+                            } catch (e) { return null; }
+                        }
+
+                        // Hover synchronization: when hovering one chart, highlight corresponding index on the other
+                        function syncHover(sourceChart, targetChart, evt) {
+                            if (!sourceChart || !targetChart) return;
+                            const idx = getIndexForEvent(sourceChart, evt);
+                            if (idx === null || isNaN(idx)) {
+                                // clear
+                                try { targetChart.setActiveElements([]); targetChart.update('none'); } catch(e){}
+                                return;
+                            }
+                            // Build active elements for targetChart: include every dataset that has a value at this index
+                            const active = [];
+                            for (let di = 0; di < targetChart.data.datasets.length; di++) {
+                                const ds = targetChart.data.datasets[di];
+                                if (!ds || !Array.isArray(ds.data)) continue;
+                                // For OHLC/candlestick the ds.data may contain objects, we only check existence
+                                if (idx >= 0 && idx < ds.data.length) {
+                                    const val = ds.data[idx];
+                                    if (val !== null && val !== undefined) active.push({ datasetIndex: di, index: idx });
+                                }
+                            }
+                            try {
+                                targetChart.setActiveElements(active);
+                                // Also update tooltip to show on the target chart
+                                const elPos = { x: sourceChart.canvas.getBoundingClientRect().left + (sourceChart.width || sourceChart.canvas.width) * 0.5, y: sourceChart.canvas.getBoundingClientRect().top };
+                                targetChart.tooltip.setActiveElements(active, { x: elPos.x, y: elPos.y });
+                                targetChart.update('none');
+                            } catch (e) {
+                                // ignore errors from tooltip API if not available
+                            }
+                        }
+
+                        // Attach hover events (mouse move and leave) on both canvases
+                        priceCanvas.addEventListener('mousemove', function(evt) { try { syncHover(topChart, rsiChart, evt); } catch(e){} });
+                        rsiCanvas.addEventListener('mousemove', function(evt) { try { syncHover(rsiChart, topChart, evt); } catch(e){} });
+                        priceCanvas.addEventListener('mouseleave', function() { try { rsiChart.setActiveElements([]); rsiChart.tooltip.setActiveElements([]); rsiChart.update('none'); topChart.setActiveElements([]); topChart.tooltip.setActiveElements([]); topChart.update('none'); } catch(e){} });
+                        rsiCanvas.addEventListener('mouseleave', function() { try { rsiChart.setActiveElements([]); rsiChart.tooltip.setActiveElements([]); rsiChart.update('none'); topChart.setActiveElements([]); topChart.tooltip.setActiveElements([]); topChart.update('none'); } catch(e){} });
+
+                        // Wheel zoom: zoom centered at pointer for price canvas (and mirror to RSI)
+                        (function attachWheelZoom(canvas, sourceChart) {
+                            let zoomFactor = 0.15; // fraction to zoom per wheel step
+                            canvas.addEventListener('wheel', function(evt) {
+                                try {
+                                    evt.preventDefault();
+                                    const delta = Math.sign(evt.deltaY);
+                                    const xScale = sourceChart.scales.x;
+                                    if (!xScale) return;
+                                    const curMin = (xScale.min !== undefined && xScale.min !== null) ? Number(xScale.min) : 0;
+                                    const curMax = (xScale.max !== undefined && xScale.max !== null) ? Number(xScale.max) : (cd.labels.length - 1);
+                                    const curRange = curMax - curMin;
+                                    const centerVal = xScale.getValueForPixel(evt.offsetX);
+                                    const center = (centerVal === undefined || centerVal === null) ? Math.round((curMin + curMax)/2) : Number(centerVal);
+                                    // delta > 0 => zoom out, delta < 0 => zoom in
+                                    const scaleDelta = (delta > 0) ? (1 + zoomFactor) : (1 - zoomFactor);
+                                    let newRange = curRange * scaleDelta;
+                                    // Enforce min window of 2 and max window of all labels
+                                    newRange = Math.max(2, Math.min(newRange, cd.labels.length - 1));
+                                    let newMin = center - newRange/2;
+                                    let newMax = center + newRange/2;
+                                    // clamp
+                                    newMin = Math.max(0, newMin);
+                                    newMax = Math.min(cd.labels.length - 1, newMax);
+                                    syncSetWindow(Math.round(newMin), Math.round(newMax), sourceChart);
+                                } catch (e) { console.warn('wheel zoom error', e); }
+                            }, { passive: false });
+                        })(priceCanvas, topChart);
+
+                        // Drag-to-pan (mouse) on price canvas: basic implementation
+                        (function attachDragPan(canvas, sourceChart) {
+                            let dragging = false, startX = 0, startMin = null, startMax = null;
+                            canvas.addEventListener('mousedown', function(evt) {
+                                dragging = true; startX = evt.clientX; const xScale = sourceChart.scales.x; startMin = Number(xScale.min || 0); startMax = Number(xScale.max || (cd.labels.length - 1)); canvas.style.cursor = 'grabbing';
+                            });
+                            window.addEventListener('mouseup', function() { if (dragging) { dragging = false; canvas.style.cursor = 'default'; } });
+                            window.addEventListener('mousemove', function(evt) {
+                                if (!dragging) return;
+                                try {
+                                    const xScale = sourceChart.scales.x;
+                                    const pxDelta = evt.clientX - startX;
+                                    // Map pixel delta to index delta using scale
+                                    const valueAtStart = xScale.getValueForPixel(startX - canvas.getBoundingClientRect().left);
+                                    const valueAtShift = xScale.getValueForPixel((startX - canvas.getBoundingClientRect().left) + pxDelta);
+                                    if (valueAtStart === undefined || valueAtShift === undefined) return;
+                                    const idxDelta = Math.round(valueAtStart - valueAtShift);
+                                    let newMin = Math.round(startMin + idxDelta);
+                                    let newMax = Math.round(startMax + idxDelta);
+                                    // clamp
+                                    const maxLabelIndex = Math.max(0, cd.labels.length - 1);
+                                    if (newMin < 0) { newMax += -newMin; newMin = 0; }
+                                    if (newMax > maxLabelIndex) { newMin -= (newMax - maxLabelIndex); newMax = maxLabelIndex; }
+                                    syncSetWindow(newMin, newMax, sourceChart);
+                                } catch (e) { /* ignore */ }
+                            });
+                        })(priceCanvas, topChart);
+
+                        // Decide on RSI panel visibility (rendered below independently)
+                        const rsiSets = allDatasets.filter(ds => ds.label && /RSI/i.test(ds.label));
+                        if (!rsiSets || rsiSets.length === 0) {
+                            rsiCanvasParent.style.display = 'none';
+                        } else {
+                            rsiCanvasParent.style.display = '';
+                        }
+                    } catch (err) {
+                        console.error('Combined price/indicator chart render failed', err);
+                    }
+
+                    // RSI CHART (bottom): render RSI series between 0-100 with threshold lines
+                    try {
+                        // Determine RSI thresholds from server config
+                        let rsiCfg = {};
+                        try {
+                            const cfgRes = await fetch('/api/config/rsi');
+                            if (cfgRes.ok) rsiCfg = await cfgRes.json();
+                        } catch (e) { /* ignore */ }
+                        const overbought = (rsiCfg && rsiCfg.rsi_overbought) ? rsiCfg.rsi_overbought : 70;
+                        const oversold = (rsiCfg && rsiCfg.rsi_oversold) ? rsiCfg.rsi_oversold : 30;
+
+                        const rsiCtx = document.getElementById('symbolRSICanvas').getContext('2d');
+                        // Find RSI datasets (labels contain 'RSI')
+                        const rsiSets = cd.datasets.filter(ds => ds.label && ds.label.toUpperCase().includes('RSI'));
+                        const rsiDatasets = rsiSets.map((ds, i) => ({ label: ds.label, data: ds.data, borderColor: ['rgb(34,197,94)','rgb(168,85,247)','rgb(251,146,60)'][i%3], backgroundColor: 'rgba(0,0,0,0)', fill: false, pointRadius: 0, tension: 0.1 }));
+
+                        // Add horizontal plugins for threshold lines using annotation plugin if available; otherwise draw with dataset lines
+                        const plugins = [];
+                        let annotationOptions = {};
+                        if (window.Chart && Chart.register && Chart._adapters && Chart.register.__annotations_supported !== false) {
+                            // We'll try to use the annotation plugin if present
+                        }
+
+                        // Fallback: add two thin datasets representing thresholds so lines appear
+                        const thresholdDatasets = [
+                            { label: 'Overbought', data: Array(cd.labels.length).fill(overbought), borderColor: 'rgba(239,68,68,0.6)', borderDash: [6,4], pointRadius: 0, fill: false, order: 0 },
+                            { label: 'Oversold', data: Array(cd.labels.length).fill(oversold), borderColor: 'rgba(34,197,94,0.6)', borderDash: [6,4], pointRadius: 0, fill: false, order: 0 }
+                        ];
+
+                        const rsiChart = new Chart(rsiCtx, {
+                            type: 'line',
+                            data: { labels: cd.labels, datasets: [...rsiDatasets, ...thresholdDatasets] },
+                            options: {
+                                responsive: true, maintainAspectRatio: false,
+                                scales: {
+                                    x: { ticks: { color: textColor }, grid: { color: gridColor } },
+                                    y: { min: 0, max: 100, ticks: { color: textColor }, grid: { color: gridColor } }
+                                },
+                                plugins: { legend: { labels: { color: textColor } } }
+                            },
+                            plugins
+                        });
+                        document.getElementById('symbolRSICanvas')._chart = rsiChart;
+                    } catch (err) {
+                        console.error('RSI chart render failed', err);
+                    }
             } catch (e) { toastr.error('Failed to load chart'); }
         }
     </script>
