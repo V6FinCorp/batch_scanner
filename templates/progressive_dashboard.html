@@ -10,23 +10,23 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
     <style>
-    /* Table styles */
+    /* Table styles (use theme variables so dark/light mode applies) */
     table.symbols-table { width: 100%; border-collapse: collapse; }
-    table.symbols-table th, table.symbols-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid #333; text-align: right; }
-    table.symbols-table th { text-align: left; user-select: none; cursor: pointer; color: #ddd; }
-    table.symbols-table tr:hover { background: rgba(255,255,255,0.03); }
-    table.symbols-table td.symbol-col, table.symbols-table th.symbol-col { text-align: left; position: sticky; left: 0; background: var(--bg-primary, #1a1a1a); }
-    .cell-muted { color: #888; }
-    .btn-icon { background: #2f2f2f; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: 0.25rem 0.4rem; margin: 0 0.15rem; cursor: pointer; }
-    .btn-icon:hover { background: #3b3b3b; }
+    table.symbols-table th, table.symbols-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border-color); text-align: right; color: var(--text-primary); }
+    table.symbols-table th { text-align: left; user-select: none; cursor: pointer; color: var(--text-secondary); }
+    table.symbols-table tr:hover { background: var(--hover-color); }
+    table.symbols-table td.symbol-col, table.symbols-table th.symbol-col { text-align: left; position: sticky; left: 0; background: var(--bg-primary); }
+    .cell-muted { color: var(--text-muted); }
+    .btn-icon { background: var(--bg-accent); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.25rem 0.4rem; margin: 0 0.15rem; cursor: pointer; }
+    .btn-icon:hover { background: var(--bg-secondary); }
     .status-badge { display: inline-block; min-width: 60px; padding: 0.1rem 0.4rem; border-radius: 10px; font-size: 0.7rem; text-align: center; }
-    .status-idle { background: #374151; color: #9ca3af; border: 1px solid #4b5563; }
-    .status-running { background: #fbbf24; color: #92400e; border: 1px solid #f59e0b; }
-    .status-success { background: #10b981; color: #065f46; border: 1px solid #059669; }
-    .status-error { background: #ef4444; color: #991b1b; border: 1px solid #dc2626; }
+    .status-idle { background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border-color); }
+    .status-running { background: var(--warning); color: #3b2b00; border: 1px solid rgba(0,0,0,0.08); }
+    .status-success { background: var(--success); color: #063; border: 1px solid rgba(0,0,0,0.06); }
+    .status-error { background: var(--danger); color: #fff; border: 1px solid rgba(0,0,0,0.06); }
     .execution-time { font-size: 0.7rem; margin-left: 0.25rem; opacity: 0.8; }
     .toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-    .search-input { background: #0f0f0f; color: #ddd; border: 1px solid #333; border-radius: 4px; padding: 0.4rem 0.6rem; min-width: 200px; }
+    .search-input { background: var(--bg-accent); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.4rem 0.6rem; min-width: 200px; }
         
         @keyframes pulse {
             0%, 100% { opacity: 1; }
@@ -48,8 +48,8 @@
         }
         
         .loading-spinner {
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #3498db;
+            border: 2px solid var(--border-color);
+            border-top: 2px solid var(--accent-color);
             border-radius: 50%;
             width: 20px;
             height: 20px;
@@ -70,14 +70,14 @@
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.8);
+            background-color: rgba(0,0,0,0.6);
         }
         
         .modal-content {
-            background-color: var(--bg-primary, #1a1a1a);
+            background-color: var(--bg-primary);
             margin: 5% auto;
             padding: 2rem;
-            border: 1px solid #333;
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             width: 80%;
             max-width: 800px;
@@ -95,14 +95,14 @@
         .log-viewer {
             max-height: 400px;
             overflow-y: auto;
-            background: #0f0f0f;
-            border: 1px solid #333;
+            background: var(--bg-accent);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             padding: 1rem;
             font-family: 'Courier New', monospace;
             font-size: 0.8rem;
             white-space: pre-wrap;
-            color: #ccc;
+            color: var(--text-primary);
         }
         
         .log-entry {
@@ -112,17 +112,17 @@
         }
         
         .log-entry.error {
-            background: rgba(239, 68, 68, 0.1);
-            border-left: 3px solid #ef4444;
+            background: rgba(239, 68, 68, 0.08);
+            border-left: 3px solid var(--danger);
         }
         
         .log-entry.warning {
-            background: rgba(251, 191, 36, 0.1);
-            border-left: 3px solid #fbbf24;
+            background: rgba(251, 191, 36, 0.08);
+            border-left: 3px solid var(--warning);
         }
         
         .log-entry.info {
-            color: #94a3b8;
+            color: var(--text-secondary);
         }
         
         .status-bar {
@@ -130,8 +130,8 @@
             bottom: 0;
             left: 0;
             right: 0;
-            background: var(--bg-secondary, #2a2a2a);
-            border-top: 1px solid #333;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
             padding: 0.5rem 1rem;
             display: flex;
             justify-content: space-between;
@@ -142,93 +142,101 @@
         .btn-close {
             background: none;
             border: none;
-            color: #999;
+            color: var(--text-secondary);
             font-size: 1.5rem;
             cursor: pointer;
         }
         
         .btn-close:hover {
-            color: #fff;
+            color: var(--text-primary);
         }
 
-        .theme-toggle { background: #2f2f2f; color:#ddd; border:1px solid #444; border-radius: 4px; padding: 0.35rem 0.5rem; cursor:pointer; }
-        .reco-bull { color:#10b981; font-weight:600; }
-        .reco-bear { color:#ef4444; font-weight:600; }
-        .reco-neutral { color:#9ca3af; }
-        .percent-pos { color:#22c55e; }
-        .percent-neg { color:#ef4444; }
-    .percent-neutral { color:#9ca3af; }
-    .rsi-pos { color:#10b981; font-weight:600; }
-    .rsi-neg { color:#ef4444; font-weight:600; }
-    .rsi-neutral { color:#9ca3af; }
-        .action-chip { display:inline-block; min-width:26px; padding:0.15rem 0.4rem; margin:0 0.1rem; border-radius:4px; text-align:center; cursor:pointer; background:#1f2937; color:#e5e7eb; border:1px solid #374151; font-size:0.85rem; }
+        /* Use theme variables for the small inline theme toggle so UI updates */
+        .theme-toggle { background: var(--bg-accent); color: var(--text-primary); border:1px solid var(--border-color); border-radius: 4px; padding: 0.35rem 0.5rem; cursor:pointer; }
+        .reco-bull { color: var(--success); font-weight:600; }
+        .reco-bear { color: var(--danger); font-weight:600; }
+        .reco-neutral { color: var(--text-muted); }
+        .percent-pos { color: var(--success); }
+        .percent-neg { color: var(--danger); }
+    .percent-neutral { color: var(--text-muted); }
+    .rsi-pos { color: var(--success); font-weight:600; }
+    .rsi-neg { color: var(--danger); font-weight:600; }
+    .rsi-neutral { color: var(--text-muted); }
+        .action-chip { display:inline-block; min-width:26px; padding:0.15rem 0.4rem; margin:0 0.1rem; border-radius:4px; text-align:center; cursor:pointer; background:var(--bg-accent); color:var(--text-primary); border:1px solid var(--border-color); font-size:0.85rem; }
         .chip-running { animation: blink 1s linear infinite; }
         @keyframes blink { 0%{opacity:1}50%{opacity:0.2}100%{opacity:1} }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-content">
+    <!-- Header (split: top = title + timestamp, bottom = filters/actions) -->
+    <header class="header">
+        <div class="header-inner">
+        <!-- Top row: title + timestamp + accordion toggle -->
+        <div class="header-top">
+            <div class="header-top-left">
                 <h1 class="header-title"><i class="fas fa-chart-line"></i> Progressive Trading Scanner</h1>
-                <div class="header-actions">
-                    <div class="controls-section">
-                        <div class="batch-controls toolbar">
-                            <button id="runAllBtn" class="btn btn-primary">
-                                <i class="fas fa-rocket"></i> Run All Scanners
-                            </button>
-                            <button id="stopAllBtn" class="btn btn-secondary" disabled>
-                                <i class="fas fa-stop"></i> Stop All
-                            </button>
-                            <span style="opacity:0.6">|</span>
-                            <button id="runRSIAllBtn" class="btn btn-secondary" title="Run/Stop RSI for all symbols">
-                                <i class="fas fa-wave-square"></i> Run RSI All
-                            </button>
-                            <button id="runEMAAllBtn" class="btn btn-secondary" title="Run/Stop EMA for all symbols">
-                                <i class="fas fa-chart-line"></i> Run EMA All
-                            </button>
-                            <button id="runDMAAllBtn" class="btn btn-secondary" title="Run/Stop DMA for all symbols">
-                                <i class="fas fa-chart-bar"></i> Run DMA All
-                            </button>
-                            <button id="refreshSymbolsBtn" class="btn btn-secondary">
-                                <i class="fas fa-sync"></i> Refresh
-                            </button>
-                        </div>
-                        <div class="timeframe-selector">
-                            <label>TimeFrame:</label>
-                            <select id="timeframeSelect" class="form-select">
-                                <option value="5mins">5 mins</option>
-                                <option value="15mins" selected>15 mins</option>
-                                <option value="30mins">30 mins</option>
-                                <option value="1hour">1 hour</option>
-                                <option value="daily">Daily</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label style="margin-right:0.25rem;">EMA/DMA as %</label>
-                            <input type="checkbox" id="togglePct" />
-                        </div>
-                        <div id="filters" style="display:flex; gap:0.5rem; align-items:center;">
-                            <label style="margin-right:0.25rem;">Reco:</label>
-                            <label><input type="checkbox" id="filter_bull" checked/> Bull</label>
-                            <label><input type="checkbox" id="filter_neutral" checked/> Neutral</label>
-                            <label><input type="checkbox" id="filter_bear" checked/> Bear</label>
-                            <label style="margin-left:0.5rem; margin-right:0.25rem;">EMA/DMA % range:</label>
-                            <input type="number" id="filter_pct_min" placeholder="-5" style="width:70px" />
-                            <input type="number" id="filter_pct_max" placeholder="5" style="width:70px" />
-                            <label><input type="checkbox" id="filter_apply_ema" checked/> EMA</label>
-                            <label><input type="checkbox" id="filter_apply_dma" checked/> DMA</label>
-                            <button id="applyFiltersBtn" class="btn btn-secondary">Apply</button>
-                        </div>
-                        <button id="viewLogsBtn" class="btn btn-secondary">
-                            <i class="fas fa-file-alt"></i> View Logs
+            </div>
+            <div class="header-top-right">
+                <div class="last-refresh" id="pageLoadTime">Last Refresh: --</div>
+                <button id="viewLogsBtnTop" class="icon-btn" title="View Logs"><i class="fas fa-file-alt"></i></button>
+                <button id="darkModeToggleTop" class="theme-toggle" title="Toggle Theme"><i class="fas fa-moon"></i></button>
+                <button id="filtersToggleBtn" class="accordion-toggle" aria-expanded="true" title="Toggle filters"><i class="fas fa-filter"></i></button>
+            </div>
+        </div>
+
+        <!-- Bottom row: existing header content (filters, actions). This is collapsible. -->
+        <div class="header-bottom" id="headerBottom">
+            <div class="header-content">
+                <div class="controls-section">
+                    <div class="batch-controls toolbar">
+                        <button id="runAllBtn" class="btn btn-primary">
+                            <i class="fas fa-rocket"></i> Run All Scanners
                         </button>
-                        <button id="darkModeToggle" class="theme-toggle" title="Toggle Theme"><i class="fas fa-moon"></i></button>
+                        <button id="stopAllBtn" class="btn btn-secondary" disabled>
+                            <i class="fas fa-stop"></i> Stop All
+                        </button>
+                        <span style="opacity:0.6">|</span>
+                        <button id="runRSIAllBtn" class="btn btn-secondary" title="Run/Stop RSI for all symbols">
+                            <i class="fas fa-wave-square"></i> Run RSI All
+                        </button>
+                        <button id="runEMAAllBtn" class="btn btn-secondary" title="Run/Stop EMA for all symbols">
+                            <i class="fas fa-chart-line"></i> Run EMA All
+                        </button>
+                        <button id="runDMAAllBtn" class="btn btn-secondary" title="Run/Stop DMA for all symbols">
+                            <i class="fas fa-chart-bar"></i> Run DMA All
+                        </button>
+                        <button id="refreshSymbolsBtn" class="btn btn-secondary">
+                            <i class="fas fa-sync"></i> Refresh
+                        </button>
                     </div>
+                    <div class="timeframe-selector">
+                        <label>TimeFrame:</label>
+                        <select id="timeframeSelect" class="form-select">
+                            <option value="5mins">5 mins</option>
+                            <option value="15mins" selected>15 mins</option>
+                            <option value="30mins">30 mins</option>
+                            <option value="1hour">1 hour</option>
+                            <option value="daily">Daily</option>
+                        </select>
+                    </div>
+                    <!-- EMA/DMA as % moved to symbols panel header (top-right) -->
+                    <div id="filters" style="display:flex; gap:0.5rem; align-items:center;">
+                        <label style="margin-right:0.25rem;">Reco:</label>
+                        <label><input type="checkbox" id="filter_bull" checked/> Bull</label>
+                        <label><input type="checkbox" id="filter_neutral" checked/> Neutral</label>
+                        <label><input type="checkbox" id="filter_bear" checked/> Bear</label>
+                        <label style="margin-left:0.5rem; margin-right:0.25rem;">EMA/DMA % range:</label>
+                        <input type="number" id="filter_pct_min" placeholder="-5" style="width:70px" />
+                        <input type="number" id="filter_pct_max" placeholder="5" style="width:70px" />
+                        <label><input type="checkbox" id="filter_apply_ema" checked/> EMA</label>
+                        <label><input type="checkbox" id="filter_apply_dma" checked/> DMA</label>
+                        <button id="applyFiltersBtn" class="btn btn-secondary">Apply</button>
+                    </div>
+                    <!-- Moved viewLogsBtn & darkModeToggle to header-top for compact layout -->
                 </div>
             </div>
-        </header>
+        </div>
+    </header>
 
         <!-- Loading State -->
         <div id="loadingState" class="panel" style="text-align: center; padding: 2rem;">
@@ -237,7 +245,7 @@
         </div>
 
         <!-- Symbols Table -->
-        <div id="symbolsContainer" class="panel" style="display: none;">
+        <div id="symbolsContainer" class="panel" style="display: none;margin:1rem">
             <div class="panel-header">
                 <h2 class="panel-title">
                     <i class="fas fa-table"></i> Symbols Dashboard
@@ -245,14 +253,19 @@
                 <div class="panel-actions">
                     <span id="symbolStats">0 symbols loaded</span>
                     <span id="progressInfo" style="margin-left: 1rem;"></span>
+                    <span style="margin-left:1rem; display:flex; align-items:center; gap:0.4rem;">
+                        <label for="togglePct" style="margin:0; font-size:0.9rem; color:var(--text-secondary);">EMA/DMA as %</label>
+                        <input type="checkbox" id="togglePct" />
+                    </span>
                 </div>
             </div>
             
             <div class="panel-content">
                 <div class="toolbar" style="margin-bottom:0.5rem;">
                     <!-- Search removed as requested -->
+                    <!-- EMA/DMA as % moved to symbols panel header (top-right) -->
                 </div>
-                <div style="overflow:auto;">
+                <div class="table-scroll">
                     <table id="symbolsTable" class="symbols-table">
                         <thead>
                             <tr>
@@ -270,7 +283,6 @@
                                 <th data-key="dma_50">DMA(50)</th>
                                 <th data-key="dma_100">DMA(100)</th>
                                 <th data-key="dma_200">DMA(200)</th>
-                                
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -346,16 +358,79 @@
             setupEventListeners();
             // init toggles
             const pctEl = document.getElementById('togglePct');
-            pctEl.checked = showPctDiff;
-            pctEl.addEventListener('change', () => { showPctDiff = pctEl.checked; localStorage.setItem('showPctDiff', JSON.stringify(showPctDiff)); renderSymbolsTable(); });
+            if (pctEl) {
+                pctEl.checked = showPctDiff;
+                pctEl.addEventListener('change', () => { showPctDiff = pctEl.checked; localStorage.setItem('showPctDiff', JSON.stringify(showPctDiff)); renderSymbolsTable(); });
+            }
             loadDarkModePreference();
             
             // Hide loading state and show symbols
             document.getElementById('loadingState').style.display = 'none';
-            document.getElementById('symbolsContainer').style.display = 'block';
+            document.getElementById('symbolsContainer').style.display = 'flex';
             
             toastr.success('Dashboard loaded successfully!', 'Welcome');
+
+            // Initialize page load timestamp in header-top
+            const pageLoadEl = document.getElementById('pageLoadTime');
+            if (pageLoadEl) {
+                pageLoadEl.textContent = 'Last Refresh: ' + new Date().toLocaleString();
+            }
+
+            // Wire the filters accordion toggle (collapses/expands header-bottom)
+            const filtersToggleBtn = document.getElementById('filtersToggleBtn');
+            const headerBottom = document.getElementById('headerBottom');
+            if (filtersToggleBtn && headerBottom) {
+                filtersToggleBtn.addEventListener('click', function() {
+                    const expanded = this.getAttribute('aria-expanded') === 'true';
+                    this.setAttribute('aria-expanded', String(!expanded));
+                    headerBottom.classList.toggle('collapsed');
+
+                    // After toggling, recompute group header height for sticky stacking
+                    setTimeout(function() {
+                        const groupRow = document.querySelector('#symbolsTable thead tr#tableGroupHeader');
+                        if (groupRow) {
+                            const rect = groupRow.getBoundingClientRect();
+                            document.documentElement.style.setProperty('--group-header-height', rect.height + 'px');
+                        }
+                        // Recompute header offsets for table stickiness
+                        computeHeaderOffset();
+                    }, 50);
+                });
+            }
+
+                // Top-row buttons exist but are wired in setupEventListeners() to avoid duplicate handlers
+                    const viewLogsBtnTop = document.getElementById('viewLogsBtnTop');
+                    const darkModeToggleTop = document.getElementById('darkModeToggleTop');
         });
+
+        // Compute header heights and set CSS variables so table headers stick below the page header
+        function computeHeaderOffset() {
+            try {
+                const headerEl = document.querySelector('header.header');
+                const headerInner = document.querySelector('.header-inner');
+                let headerHeight = 0;
+                if (headerEl) {
+                    headerHeight = headerEl.getBoundingClientRect().height;
+                } else if (headerInner) {
+                    headerHeight = headerInner.getBoundingClientRect().height;
+                }
+                document.documentElement.style.setProperty('--header-height', headerHeight + 'px');
+
+                // If a group header row exists, set --group-header-height; otherwise zero
+                const groupRow = document.querySelector('#symbolsTable thead tr#tableGroupHeader');
+                if (groupRow) {
+                    const rect = groupRow.getBoundingClientRect();
+                    document.documentElement.style.setProperty('--group-header-height', rect.height + 'px');
+                } else {
+                    document.documentElement.style.setProperty('--group-header-height', '0px');
+                }
+            } catch (e) { console.warn('computeHeaderOffset failed', e); }
+        }
+
+        // Update offsets on resize and when content/layout changes
+        window.addEventListener('resize', function() { computeHeaderOffset(); });
+        // Also compute after initial load (in case called earlier)
+        window.addEventListener('load', function() { computeHeaderOffset(); });
 
         // Load symbols from API
         async function loadSymbols() {
@@ -909,8 +984,8 @@
             const runBtn = document.getElementById('runAllBtn');
             const stopBtn = document.getElementById('stopAllBtn');
             stopRequested = false;
-            runBtn.disabled = true;
-            stopBtn.disabled = false;
+            if (runBtn) runBtn.disabled = true;
+            if (stopBtn) stopBtn.disabled = false;
             
             toastr.info(`Starting batch analysis for ${symbols.length} symbols...`, 'Batch Analysis');
             
@@ -944,8 +1019,8 @@
             } catch (error) {
                 toastr.error('Batch analysis interrupted: ' + (error?.message || error), 'Error');
             } finally {
-                runBtn.disabled = false;
-                stopBtn.disabled = true;
+                if (runBtn) runBtn.disabled = false;
+                if (stopBtn) stopBtn.disabled = true;
                 updateStatusBar('Batch analysis finished');
             }
         }
@@ -959,24 +1034,37 @@
 
         // Setup event listeners
         function setupEventListeners() {
-            document.getElementById('runAllBtn').onclick = runAllScanners;
-            document.getElementById('stopAllBtn').onclick = stopAllScanners;
-            document.getElementById('refreshSymbolsBtn').onclick = () => location.reload();
+            // Guard each element lookup so missing/renamed nodes don't throw errors
+            const elRunAll = document.getElementById('runAllBtn'); if (elRunAll) elRunAll.onclick = runAllScanners;
+            const elStopAll = document.getElementById('stopAllBtn'); if (elStopAll) elStopAll.onclick = stopAllScanners;
+            const elRefresh = document.getElementById('refreshSymbolsBtn'); if (elRefresh) elRefresh.onclick = () => location.reload();
+
             // Toggle-run/stop buttons for per-scanner batches
-            document.getElementById('runRSIAllBtn').onclick = async function() {
-                const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop RSI'; stopRequestedFor.rsi = false; btn.disabled = false; await runAllOfScanner('rsi'); btn._running = false; btn.innerHTML = '<i class="fas fa-wave-square"></i> Run RSI All'; } else { stopRequestedFor.rsi = true; }
-            };
-            document.getElementById('runEMAAllBtn').onclick = async function() {
-                const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop EMA'; stopRequestedFor.ema = false; btn.disabled = false; await runAllOfScanner('ema'); btn._running = false; btn.innerHTML = '<i class="fas fa-chart-line"></i> Run EMA All'; } else { stopRequestedFor.ema = true; }
-            };
-            document.getElementById('runDMAAllBtn').onclick = async function() {
-                const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop DMA'; stopRequestedFor.dma = false; btn.disabled = false; await runAllOfScanner('dma'); btn._running = false; btn.innerHTML = '<i class="fas fa-chart-bar"></i> Run DMA All'; } else { stopRequestedFor.dma = true; }
-            };
-            document.getElementById('viewLogsBtn').onclick = openLogModal;
-            document.getElementById('closeLogModal').onclick = closeLogModal;
-            document.getElementById('clearLogsBtn').onclick = clearLogs;
-            document.getElementById('refreshLogsBtn').onclick = loadLogs;
-            document.getElementById('darkModeToggle').onclick = toggleDarkMode;
+            const elRunRSIAll = document.getElementById('runRSIAllBtn'); if (elRunRSIAll) elRunRSIAll.onclick = async function() { const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop RSI'; stopRequestedFor.rsi = false; btn.disabled = false; await runAllOfScanner('rsi'); btn._running = false; btn.innerHTML = '<i class="fas fa-wave-square"></i> Run RSI All'; } else { stopRequestedFor.rsi = true; } };
+            const elRunEMAAll = document.getElementById('runEMAAllBtn'); if (elRunEMAAll) elRunEMAAll.onclick = async function() { const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop EMA'; stopRequestedFor.ema = false; btn.disabled = false; await runAllOfScanner('ema'); btn._running = false; btn.innerHTML = '<i class="fas fa-chart-line"></i> Run EMA All'; } else { stopRequestedFor.ema = true; } };
+            const elRunDMAAll = document.getElementById('runDMAAllBtn'); if (elRunDMAAll) elRunDMAAll.onclick = async function() { const btn = this; if (!btn._running) { btn._running = true; btn.disabled = true; btn.innerHTML = '<i class="fas fa-stop"></i> Stop DMA'; stopRequestedFor.dma = false; btn.disabled = false; await runAllOfScanner('dma'); btn._running = false; btn.innerHTML = '<i class="fas fa-chart-bar"></i> Run DMA All'; } else { stopRequestedFor.dma = true; } };
+
+            // Logs and modals
+            const elViewLogs = document.getElementById('viewLogsBtn') || document.getElementById('viewLogsBtnTop'); if (elViewLogs) elViewLogs.onclick = openLogModal;
+            const elCloseLogModal = document.getElementById('closeLogModal'); if (elCloseLogModal) elCloseLogModal.onclick = closeLogModal;
+            const elClearLogs = document.getElementById('clearLogsBtn'); if (elClearLogs) elClearLogs.onclick = clearLogs;
+            const elRefreshLogs = document.getElementById('refreshLogsBtn'); if (elRefreshLogs) elRefreshLogs.onclick = loadLogs;
+
+            // Theme toggle (old id or new top-row id)
+            const elDarkToggle = document.getElementById('darkModeToggle') || document.getElementById('darkModeToggleTop');
+            if (elDarkToggle) {
+                try {
+                    // Remove any inline onclick handler
+                    elDarkToggle.onclick = null;
+                    // Clone the node to strip any previously attached event listeners (addEventListener)
+                    const cloned = elDarkToggle.cloneNode(true);
+                    elDarkToggle.parentNode.replaceChild(cloned, elDarkToggle);
+                    cloned.addEventListener('click', function (e) { e.preventDefault(); toggleDarkMode(); });
+                } catch (e) {
+                    // Fallback: set onclick if cloning fails
+                    elDarkToggle.onclick = toggleDarkMode;
+                }
+            }
         }
 
         async function refreshRow(symbol, scanner) {
@@ -1183,21 +1271,42 @@
         }
 
         // Dark mode
+        function updateThemeToggleUI() {
+            // Update any toggle icon/text for both old and new IDs
+            const btn = document.getElementById('darkModeToggle') || document.getElementById('darkModeToggleTop');
+            if (!btn) return;
+            // Use sun icon for light mode, moon for dark
+            btn.innerHTML = isDarkMode ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+            btn.setAttribute('aria-pressed', String(isDarkMode));
+            console.debug('[theme] updateThemeToggleUI: isDarkMode=', isDarkMode);
+        }
+
         function toggleDarkMode() {
             isDarkMode = !isDarkMode;
             if (isDarkMode) {
                 document.documentElement.setAttribute('data-theme', 'dark');
+                document.body.classList.add('dark');
             } else {
                 document.documentElement.removeAttribute('data-theme');
+                document.body.classList.remove('dark');
             }
             localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
+            console.debug('[theme] toggleDarkMode -> isDarkMode=', isDarkMode);
+            updateThemeToggleUI();
         }
+
         function loadDarkModePreference() {
+            // Ensure isDarkMode is boolean from localStorage
+            isDarkMode = JSON.parse(localStorage.getItem('darkMode') || JSON.stringify(isDarkMode));
             if (isDarkMode) {
                 document.documentElement.setAttribute('data-theme', 'dark');
+                document.body.classList.add('dark');
             } else {
                 document.documentElement.removeAttribute('data-theme');
+                document.body.classList.remove('dark');
             }
+            console.debug('[theme] loadDarkModePreference -> isDarkMode=', isDarkMode);
+            updateThemeToggleUI();
         }
 
         // Chart modal for per-symbol chart

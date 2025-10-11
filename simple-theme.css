@@ -20,6 +20,9 @@
   --info: #17a2b8;
   --hover-color: rgba(0, 123, 255, 0.1);
   --accent-color: #007bff;
+  /* Height applied to the stacked column headers when group header is present.
+    This is set to 0 by default and adjusted via JS when the group header is rendered. */
+  --group-header-height: 0px;
 }
 
 /* Dark Theme Colors */
@@ -59,29 +62,89 @@ body {
 
 /* Header Styles */
 header {
-    background-color: var(--bg-primary);
-    border-bottom: 1px solid var(--border-color);
-    padding: 1rem 0;
-    position: sticky;
-    top: 0;
-    z-index: 100;
+  background-color: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  width: 100%;
 }
 
 .header {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
-  padding: 0.5rem;
   box-shadow: var(--shadow);
 }
 
+/* Inner wrapper keeps header content aligned with page container */
+.header-inner {
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
 .header-content {
-  max-width: none;
-  margin: 0;
-  padding: 0 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
+
+/* Split header: top row (title + last-refresh) and bottom row (filters) */
+.header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    background: var(--bg-secondary);
+    padding: 1rem;
+}
+.header-bottom {
+  padding: 0.25rem 0 0.5rem 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header-right { display:flex; align-items:center; gap:1rem; }
+.last-refresh { color: var(--text-secondary); font-size: 0.9rem; }
+
+/* Ensure header-top spans full width and items align properly */
+.header-top-left { flex: 1 1 auto; display:flex; align-items:center; }
+.header-top-right { display:flex; align-items:center; gap:0.6rem; justify-content:flex-end; }
+
+/* compact icon buttons used in top-right (logs, theme, filters) */
+.icon-btn, .accordion-toggle, .theme-toggle {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+.icon-btn i, .accordion-toggle i, .theme-toggle i { font-size: 0.95rem; }
+.icon-btn:hover, .accordion-toggle:hover, .theme-toggle:hover { background: var(--hover-color); }
+
+/* Make header-bottom align with header-top padding */
+.header-bottom { padding: 0.25rem 2rem 0.5rem 2rem; }
+
+/* Accordion toggle for filters */
+.accordion-toggle {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.accordion-toggle[aria-expanded="false"] { opacity: 0.9; }
+.header-bottom.collapsed { display: none; }
 
 .header-title {
   font-size: 1.25rem;
@@ -140,6 +203,31 @@ header {
   border-bottom: 1px solid var(--border-color);
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
+}
+
+/* Make panel headers layout-friendly: title left, actions right */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.panel-header .panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Push progressInfo to the far right of the panel header */
+.panel-header .panel-actions #progressInfo {
+  margin-left: auto;
+}
+
+/* Symbols container should behave as a vertical flex container when visible */
+#symbolsContainer {
+  display: none; /* initially hidden; script will set to flex */
+  flex-direction: column;
 }
 
 .analysis-title, .panel-title {
@@ -427,6 +515,34 @@ header {
   border: 1px solid var(--border-color);
 }
 
+/* Grouped column header styling (for multi-row thead grouping) */
+.table thead tr.group-header th,
+.symbols-table thead tr.group-header th {
+  background: linear-gradient(180deg, var(--bg-accent), var(--bg-secondary));
+  text-align: center;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 700;
+  color: var(--text-primary);
+  position: sticky;
+  top: 0;
+  z-index: 12; /* above column headers */
+}
+.table thead tr.group-header th:not(:last-child) {
+  border-right: 1px solid var(--border-color);
+}
+
+/* Zebra striping for symbols table (explicit) */
+.symbols-table tbody tr:nth-child(even) {
+  background-color: var(--bg-secondary);
+}
+.symbols-table tbody tr:nth-child(odd) {
+  background-color: var(--bg-primary);
+}
+.symbols-table tbody tr:hover {
+  background-color: var(--hover-color);
+}
+
 .table {
     width: 100%;
     border-collapse: collapse;
@@ -447,8 +563,45 @@ header {
   font-weight: 600;
   color: var(--text-primary);
   position: sticky;
+  top: var(--group-header-height); /* pushed down by group header if present */
+  z-index: 11;
+}
+
+/* Make progressive dashboard symbolsTable header sticky, below the page header */
+#symbolsTable thead th {
+  position: sticky;
+  background: var(--bg-secondary);
+  z-index: 20; /* above table rows */
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+}
+
+#symbolsTable thead th.symbol-col {
+  left: 0;
+  z-index: 21; /* keep symbol column above other header cells */
+}
+
+/* Scrolling wrapper for tables: keep header visible while tbody scrolls vertically */
+.table-scroll {
+  max-height: 60vh; /* adjust as needed */
+  overflow-y: auto;
+  overflow-x: auto;
+  position: relative; /* create a stacking context for sticky headers inside */
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-secondary) var(--bg-primary);
+}
+
+/* When table is inside .table-scroll, make the thead sticky to the wrapper top */
+.table-scroll thead th {
+  position: sticky;
   top: 0;
-  z-index: 10;
+  background: var(--bg-secondary);
+  z-index: 30;
+}
+
+.table-scroll thead th.symbol-col {
+  left: 0;
+  z-index: 31;
 }
 
 .table tbody tr:nth-child(even) {

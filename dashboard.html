@@ -15,19 +15,9 @@
         <div class="header-content">
             <div class="header-left">
                 <h1 class="header-title"><i class="fas fa-chart-line"></i> Trading Scanners</h1>
-                <div id="headerSummaryInfo" class="header-center" style="display: none;">
-                    <div class="header-symbol-info">
-                        <span id="headerSymbolName">--</span>
-                        <span class="symbol-price" id="headerSymbolPrice">0.00</span>
-                    </div>
-                    <div class="last-updated">
-                        <i class="fas fa-clock"></i> <span id="headerLastUpdated">Last Updated: --</span>
-                    </div>
-                </div>
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 1rem;">
-                    <!-- Global TimeFrame Selector (applies to RSI & EMA) -->
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <label style="color: var(--text-secondary); font-size: 0.85rem; white-space: nowrap;">TimeFrame:</label>
                         <select id="globalTimeframe" class="form-select" style="min-width: 140px; padding: 0.25rem 0.5rem; font-size: 0.85rem;">
@@ -47,7 +37,6 @@
                         <i class="fas fa-calendar"></i> <span style="font-size: 0.8rem;" id="currentDateTime">Sep 7, 2025 12:00:00 PM</span>
                     </div>
                 </div>
-                <!-- Dark Mode Toggle -->
                 <button id="darkModeToggle" class="theme-toggle" title="Toggle Theme">
                     <i class="fas fa-moon"></i>
                 </button>
@@ -260,9 +249,12 @@
                 <div id="tableContainer" class="table-container">
                     <table id="resultsTable" class="table">
                         <thead>
+                            <tr class="group-header" id="tableGroupHeader" style="display:none;">
+                                <!-- Dynamic group header (colspan based) will be inserted here -->
+                            </tr>
                             <tr id="tableHeaderRow">
                                 <th id="timeHeader" class="sortable">
-                                    Time <span id="timeSortIcon">↓</span>
+                                    Time <span id="timeSortIcon"></span>
                                 </th>
                                 <th class="non-sortable">
                                     Symbol <span></span>
@@ -1878,6 +1870,33 @@
 
             // Update sort icons
             updateSortIcons();
+
+            // Build grouped header (IDENT | PRICE | INDICATORS | SIGNAL) dynamically
+            try {
+                const groupRow = document.getElementById('tableGroupHeader');
+                if (groupRow) {
+                    const hasSignal = indicatorCols.some(c => c.toUpperCase() === 'SIGNAL');
+                    const indicatorCount = indicatorCols.length - (hasSignal ? 1 : 0);
+                    const groups = [];
+                    groups.push({ name: 'IDENT', span: 2 }); // Time + Symbol
+                    groups.push({ name: 'PRICE', span: 1 }); // CMP
+                    if (indicatorCount > 0) groups.push({ name: 'INDICATORS', span: indicatorCount });
+                    if (hasSignal) groups.push({ name: 'SIGNAL', span: 1 });
+
+                    groupRow.innerHTML = groups.map(g => `<th colspan="${g.span}">${g.name}</th>`).join('');
+                    const shown = groups.length > 0;
+                    groupRow.style.display = shown ? '' : 'none';
+                    try {
+                        const root = document.documentElement;
+                        if (shown) {
+                            const h = groupRow.offsetHeight || groupRow.getBoundingClientRect().height || 0;
+                            root.style.setProperty('--group-header-height', h + 'px');
+                        } else {
+                            root.style.setProperty('--group-header-height', '0px');
+                        }
+                    } catch (err) { /* ignore */ }
+                }
+            } catch (e) { /* ignore grouping errors */ }
 
             // Update colspan for empty message
             const totalCols = 3 + indicatorCols.length; // Time, Symbol, CMP + indicators
