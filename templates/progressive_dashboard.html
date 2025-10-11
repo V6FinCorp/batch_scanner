@@ -1421,6 +1421,15 @@
             const emaCb = document.getElementById('modalEnableEMA'); if (emaCb) emaCb.onchange = load;
             const dmaCb = document.getElementById('modalEnableDMA'); if (dmaCb) dmaCb.onchange = load;
             const reload = document.getElementById('reloadChartBtn'); if (reload) reload.onclick = load;
+            // Wire timeframe dropdown to update chart on change (debounced)
+            const tfSelect = document.getElementById('modalTimeframeSelect');
+            if (tfSelect) {
+                // Debounce 500ms to prevent accidental double runs
+                const debouncedLoad = debounce(load, 500);
+                tfSelect.addEventListener('change', () => {
+                    try { debouncedLoad(); } catch(e) { console.warn('Timeframe change handler failed', e); }
+                });
+            }
             load();
         }
     async function runScannersForSymbolTimeframe(symbol, timeframe, scanners = ['rsi','ema','dma']) {
@@ -1453,6 +1462,16 @@
             }
         }
         clearModalProgress();
+    }
+
+    // Small debounce helper for UI interactions (prevents rapid repeated runs)
+    function debounce(fn, wait) {
+        let timer = null;
+        return function(...args) {
+            const ctx = this;
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => { timer = null; fn.apply(ctx, args); }, wait);
+        };
     }
 
     // Helper: fetch /api/chart-data/<scanner>/<symbol> with retries until chartData appears
