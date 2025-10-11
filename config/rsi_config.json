@@ -1,6 +1,6 @@
 {
     "symbols": [
-        "ASIANPAINT"
+        "ADANIENT"
     ],
     "rsi_periods": [
         5,
@@ -11,7 +11,7 @@
     "days_fallback_threshold": 200,
     "rsi_overbought": 70,
     "rsi_oversold": 30,
-    "base_timeframe": "15mins",
-    "default_timeframe": "15mins",
+    "base_timeframe": "5mins",
+    "default_timeframe": "5mins",
     "days_to_list": 4
 }

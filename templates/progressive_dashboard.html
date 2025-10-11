@@ -309,7 +309,7 @@
     
     <script>
         // Global state
-    let symbols = [];
+        let symbols = [];
     let scannerStates = {};
     let runningScans = new Set();
     let totalRunning = 0;
@@ -321,6 +321,29 @@
     let chartInstance = null;
     // Column index map for dynamic header columns
     let colIndexMap = {};
+        // Modal progress toast handle (to update/clear persistent progress messages)
+        let modalProgressToast = null;
+
+        function showModalProgress(msg, severity = 'info') {
+            try {
+                // Clear existing persistent toast
+                if (modalProgressToast) {
+                    try { toastr.clear(modalProgressToast); } catch(e){}
+                    modalProgressToast = null;
+                }
+                // Create a non-expiring toast
+                modalProgressToast = toastr[severity](msg, null, { timeOut: 0, extendedTimeOut: 0, closeButton: true, tapToDismiss: false });
+            } catch (e) { console.warn('showModalProgress failed', e); }
+        }
+
+        function clearModalProgress() {
+            try {
+                if (modalProgressToast) {
+                    try { toastr.clear(modalProgressToast); } catch(e){}
+                    modalProgressToast = null;
+                }
+            } catch (e) { /* ignore */ }
+        }
         
         // Toastr configuration
         toastr.options = {
@@ -1362,6 +1385,13 @@
                         <label style="margin-right:6px">Scanners:</label>
                         <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="modalEnableEMA" checked/> EMA</label>
                         <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" id="modalEnableDMA" checked/> DMA</label>
+                        <label style="margin-left:6px; display:flex; align-items:center; gap:6px;">Timeframe:</label>
+                        <select id="modalTimeframeSelect" class="form-select" style="width:110px">
+                            <option value="5mins">5 mins</option>
+                            <option value="15mins" selected>15 mins</option>
+                            <option value="30mins">30 mins</option>
+                            <option value="1hour">1 hour</option>
+                        </select>
                         <span style="flex:1"></span>
                         <button class="btn btn-secondary" id="reloadChartBtn"><i class="fas fa-sync"></i> Reload</button>
                     </div>
@@ -1384,7 +1414,8 @@
             const load = async () => {
                 const enableEMA = document.getElementById('modalEnableEMA')?.checked ?? true;
                 const enableDMA = document.getElementById('modalEnableDMA')?.checked ?? true;
-                await loadSymbolChart(symbol, { enableEMA, enableDMA });
+                const tf = document.getElementById('modalTimeframeSelect')?.value || document.getElementById('timeframeSelect')?.value || '15mins';
+                await loadSymbolChart(symbol, { enableEMA, enableDMA, timeframe: tf, forceRun: true });
             };
             // Wire checkbox toggles
             const emaCb = document.getElementById('modalEnableEMA'); if (emaCb) emaCb.onchange = load;
@@ -1392,13 +1423,95 @@
             const reload = document.getElementById('reloadChartBtn'); if (reload) reload.onclick = load;
             load();
         }
-    async function loadSymbolChart(symbol, options = { enableEMA: true, enableDMA: true }) {
+    async function runScannersForSymbolTimeframe(symbol, timeframe, scanners = ['rsi','ema','dma']) {
+        // Run scanners sequentially for the requested timeframe so server computes indicators at the desired granularity
+        for (const scanner of scanners) {
             try {
+                // Request run-single-scanner API
+                showModalProgress(`Running ${scanner.toUpperCase()} for ${symbol} @ ${timeframe}...`);
+                const resp = await fetch('/api/run-single-scanner', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ scanner: scanner, symbol: symbol, baseTimeframe: timeframe, daysToList: 4 })
+                });
+                // If network error occurs, fetch will throw and we'll jump to catch
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.returncode !== 0) {
+                    console.warn(`Scanner ${scanner} run for ${symbol}@${timeframe} returned:`, data);
+                    try { toastr.warning(`${scanner.toUpperCase()} run returned: ${data && data.error ? data.error : 'non-zero'}`, 'Scanner'); } catch(e){}
+                    // continue to next scanner; chart may still render with partial datasets
+                }
+                // small delay to allow CSV write/availability
+                await new Promise(r => setTimeout(r, 350));
+                // Inform success briefly
+                showModalProgress(`${scanner.toUpperCase()} completed for ${symbol}`,'success');
+            } catch (e) {
+                // Network or server error; warn and continue so UI remains responsive
+                console.warn('Error running scanner', scanner, e);
+                try { toastr.warning(`Scanner ${scanner} run failed: ${e.message || e}`, 'Server'); } catch(err){}
+                // Don't throw further; the caller will still attempt to fetch existing chart data
+            }
+        }
+        clearModalProgress();
+    }
+
+    // Helper: fetch /api/chart-data/<scanner>/<symbol> with retries until chartData appears
+    async function fetchChartDataWithRetry(scanner, symbol, maxAttempts = 8, initialDelay = 400) {
+        let attempt = 0;
+        let delay = initialDelay;
+        while (attempt < maxAttempts) {
+            try {
+                showModalProgress(`Waiting for ${scanner.toUpperCase()} chart data (${attempt+1}/${maxAttempts})...`);
+                const res = await fetch(`/api/chart-data/${scanner}/${symbol}`, { cache: 'no-store' });
+                if (res.ok) {
+                    const payload = await res.json().catch(() => ({}));
+                    if (payload && payload.chartData && payload.chartData.labels && payload.chartData.datasets && payload.chartData.datasets.length > 0) {
+                        clearModalProgress();
+                        return payload;
+                    }
+                    // If response is OK but no chartData yet, wait and retry
+                }
+            } catch (e) {
+                // Network error — server may be down; break early if connection reset
+                console.warn(`fetchChartDataWithRetry network error for ${scanner}/${symbol}:`, e);
+            }
+            // backoff
+            await new Promise(r => setTimeout(r, delay));
+            attempt++;
+            delay = Math.min(2000, Math.round(delay * 1.6));
+        }
+        // Final attempt: try once and return whatever we get (even if empty)
+        try {
+            const res = await fetch(`/api/chart-data/${scanner}/${symbol}`, { cache: 'no-store' });
+            if (res.ok) {
+                const payload = await res.json().catch(() => ({}));
+                clearModalProgress();
+                return payload;
+            }
+        } catch (e) { /* ignore */ }
+        clearModalProgress();
+        return null;
+    }
+
+    async function loadSymbolChart(symbol, options = { enableEMA: true, enableDMA: true, timeframe: '15mins', forceRun: false }) {
+            try {
+                    // If requested, trigger server to run scanners at the selected timeframe so CSVs are computed at that timeframe
+                    const tf = options.timeframe || '15mins';
+                    if (options.forceRun) {
+                        // Run only the scanners requested/enabled to save time
+                        const scannersToRun = ['rsi', 'ema', 'dma'].filter(s => (s !== 'ema' || options.enableEMA) && (s !== 'dma' || options.enableDMA));
+                        await runScannersForSymbolTimeframe(symbol, tf, scannersToRun);
+                    }
+
                     // Fetch chart data for all scanners (rsi, ema, dma) and merge into a single combined chartData
                     const scannersToFetch = ['rsi','ema','dma'];
-                    const fetches = await Promise.all(scannersToFetch.map(s =>
-                        fetch(`/api/chart-data/${s}/${symbol}`).then(r => r.ok ? r.json() : { error: `HTTP ${r.status}` }).catch(e => ({ error: e.message }))
-                    ));
+                    // Try to fetch each scanner's chart-data with retries so we tolerate brief server processing delays
+                    const fetchPromises = scannersToFetch.map(async s => {
+                        const payload = await fetchChartDataWithRetry(s, symbol, 8, 400).catch(e => null);
+                        if (!payload) return { error: `No data for ${s}` };
+                        return payload;
+                    });
+                    const fetches = await Promise.all(fetchPromises);
 
                     // Build combined chartData
                     const combined = { labels: null, datasets: [] };

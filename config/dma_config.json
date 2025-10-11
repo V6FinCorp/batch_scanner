@@ -9,7 +9,8 @@
         100,
         200
     ],
-    "base_timeframe": "daily",
-    "days_to_list": 30,
-    "days_fallback_threshold": 400
+    "base_timeframe": "5mins",
+    "days_to_list": 4,
+    "days_fallback_threshold": 400,
+    "displacement": 1
 }
