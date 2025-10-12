@@ -214,16 +214,7 @@
                     <!-- timeframe-selector moved to symbols panel-actions for compact layout -->
                     <!-- EMA/DMA as % moved to symbols panel header (top-right) -->
                     <div id="filters" style="display:flex; gap:0.5rem; align-items:center;">
-                        <label style="margin-right:0.25rem;">Reco:</label>
-                        <label><input type="checkbox" id="filter_bull" checked/> Bull</label>
-                            <label><input type="checkbox" id="filter_neutral" checked/> Neutral</label>
-                        <label><input type="checkbox" id="filter_bear" checked/> Bear</label>
-                        <label style="margin-left:0.5rem; margin-right:0.25rem;">EMA/DMA % range:</label>
-                        <input type="number" id="filter_pct_min" placeholder="-5" style="width:70px" />
-                        <input type="number" id="filter_pct_max" placeholder="5" style="width:70px" />
-                        <label><input type="checkbox" id="filter_apply_ema" checked/> EMA</label>
-                        <label><input type="checkbox" id="filter_apply_dma" checked/> DMA</label>
-                        <button id="applyFiltersBtn" class="btn btn-secondary">Apply</button>
+                        <!-- Reco filters removed from top controls -- EMA/DMA % range moved to panel-actions -->
                     </div>
                     <!-- Moved viewLogsBtn & darkModeToggle to header-top for compact layout -->
                 </div>
@@ -245,12 +236,26 @@
                 </h2>
                 <div class="panel-actions">
                     <span id="symbolStats">0 symbols loaded</span>
-                    <span id="progressInfo" style="margin-left: 1rem;"></span>
-                    <div style="margin-left:1rem; display:flex; align-items:center; gap:0.6rem;">
+                     <span style="opacity:0.6">|</span>
+                    <span id="progressInfo"></span>
+                    <!-- Reco filter controls (populated dynamically from table unique Reco labels) -->
+                    <div id="panelRecoFilters" style="display:flex; align-items:center; gap:0.5rem;"></div>
+                        <!-- Moved EMA/DMA percent-range filter into panel-actions -->
+                        <div style="margin-left:1rem; display:flex; align-items:center; gap:0.6rem;">
+                            <label style="margin-right:0.25rem;">EMA/DMA % range:</label>
+                            <input type="number" id="filter_pct_min" placeholder="-5" style="width:70px" />
+                            <input type="number" id="filter_pct_max" placeholder="5" style="width:70px" />
+                            <label><input type="checkbox" id="filter_apply_ema" checked/> EMA</label>
+                            <label><input type="checkbox" id="filter_apply_dma" checked/> DMA</label>
+                            <button id="applyFiltersBtn" class="btn btn-secondary">Apply</button>
+                        </div>
+                    <span style="opacity:0.6">|</span>
+                    <div style="display:flex; align-items:center; gap:0.6rem;">
                         <label for="togglePct" style="margin:0; font-size:0.9rem; color:var(--text-secondary);">EMA/DMA as %</label>
                         <input type="checkbox" id="togglePct" />
                     </div>
-                    <div style="margin-left:1rem; display:flex; align-items:center; gap:0.5rem;">
+                    <span style="opacity:0.6">|</span>
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
                         <label style="margin-right:0.25rem;">TimeFrame:</label>
                         <select id="timeframeSelect" class="form-select">
                             <option value="5mins">5 mins</option>
@@ -614,6 +619,31 @@
             }
             // apply advanced filters after rendering
             applyFilters();
+            // build panel-level Reco filters based on current table content
+            try { buildPanelRecoFilters(); } catch(e) { /* ignore */ }
+        }
+
+        // Build panel-level Reco filter checkboxes dynamically from distinct Reco labels
+        function buildPanelRecoFilters() {
+            try {
+                const container = document.getElementById('panelRecoFilters');
+                if (!container) return;
+                // Simplified: always provide Bull / Neutral / Bear checkboxes
+                container.innerHTML = '';
+                const title = document.createElement('span'); title.style.opacity = '0.8'; title.style.fontSize = '0.9rem'; title.textContent = 'Reco:';
+                container.appendChild(title);
+                const categories = ['Bull','Neutral','Bear'];
+                categories.forEach(lbl => {
+                    const id = `panel_reco_${lbl.toLowerCase()}`;
+                    const labelEl = document.createElement('label');
+                    labelEl.style.display = 'flex'; labelEl.style.alignItems = 'center'; labelEl.style.gap = '0.25rem';
+                    const chk = document.createElement('input'); chk.type = 'checkbox'; chk.id = id; chk.checked = true;
+                    chk.addEventListener('change', () => { applyFilters(); });
+                    const span = document.createElement('span'); span.style.fontSize = '0.9rem'; span.textContent = ' ' + lbl;
+                    labelEl.appendChild(chk); labelEl.appendChild(span);
+                    container.appendChild(labelEl);
+                });
+            } catch (e) { console.warn('buildPanelRecoFilters failed', e); }
         }
 
         // Draw small candlesticks into a canvas for last 5 points
@@ -743,7 +773,7 @@
 
                 // Successful draw
                 // Force clear before draw to ensure redraw on all browsers
-                try { const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); } catch(e){}
+                try { const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); } catch(e){ }
                 drawMiniCandles(canvas, ohlcArray);
                 try { console.debug(`[mini] drew mini-candles for ${symbol} (points=${ohlcArray.length})`); } catch(e){}
                 return true;
@@ -884,6 +914,15 @@
                     cells[idx15].innerHTML = showPctDiff ? formatPct(ema15) : `<span class="${cls15}">${formatVal(ema15)}</span>`;
                 }
 
+                // Mark reco as pending for this row since EMA values changed; schedule recompute
+                try {
+                    const recoCell = row.querySelector('.reco-cell');
+                    if (recoCell) {
+                        recoCell.setAttribute('data-reco-state', 'pending');
+                        setTimeout(() => { updateRecoForRow(symbol); }, 80);
+                    }
+                } catch (e) { /* ignore */ }
+
                 return true;
             } catch (e) { console.warn('updateEmaForSymbol failed', symbol, e); return false; }
         }
@@ -912,6 +951,8 @@
                 await runWithConcurrency(list, async (sym) => { await updateEmaForSymbol(sym, tf); }, 6);
                 clearModalProgress();
                 toastr.success('EMA(9/15) updated to selected timeframe', 'EMA Updated');
+                // After EMA values updated, attempt to populate missing DMA values for visible rows
+                try { await ensureDmaForVisibleRows(); } catch(e) { /* ignore */ }
                 try { updateAllRecoLabels(); } catch(e) { /* ignore */ }
             } catch (e) {
                 try { clearModalProgress(); } catch(e){}
@@ -919,23 +960,55 @@
             }
         }
 
+        // Update reco for a single row (compute after other indicators have been updated)
+        async function updateRecoForRow(symbol) {
+            try {
+                const row = document.getElementById(`row-${symbol}`);
+                if (!row) return;
+                const cell = row.querySelector('.reco-cell');
+                if (!cell) return;
+                // If already computed and not pending, skip
+                const state = cell.getAttribute('data-reco-state');
+                if (state === 'done') return;
+                // compute score using DOM fallback; this will read latest EMA/DMA/RSI cells
+                const score = computeRecoScore(symbol);
+                cell.innerHTML = scoreToLabelHtml(score);
+                try { cell.title = buildRecoTooltip(symbol, score); } catch(e) { /* ignore */ }
+                cell.setAttribute('data-reco-state', 'done');
+            } catch (e) { console.warn('updateRecoForRow failed', symbol, e); }
+        }
+
         // Recompute Reco labels for all visible rows (use computeRecoScore)
+        // Runs updates asynchronously per-row to allow indicator fetches/updates to complete
         function updateAllRecoLabels() {
             try {
                 const tbody = document.getElementById('symbolsTBody');
                 if (!tbody) return;
-                tbody.querySelectorAll('tr').forEach(tr => {
-                    try {
-                        const sym = tr.id && tr.id.replace && tr.id.replace('row-','');
-                        if (!sym) return;
-                        const cell = tr.querySelector('.reco-cell');
-                        if (!cell) return;
-                        // computeRecoScore will attempt DOM fallback when a string is passed
-                        const score = computeRecoScore(sym);
-                        cell.innerHTML = scoreToLabelHtml(score);
-                        try { cell.title = buildRecoTooltip(sym, score); } catch(e) { /* ignore */ }
-                    } catch(e) { /* ignore per-row errors */ }
-                });
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                // schedule updates in small batches to avoid blocking UI
+                const batchSize = 20;
+                for (let i = 0; i < rows.length; i += batchSize) {
+                    const batch = rows.slice(i, i + batchSize);
+                    // schedule next batch in next tick so DOM updates can settle
+                    setTimeout(() => {
+                        batch.forEach(tr => {
+                            try {
+                                const sym = tr.id && tr.id.replace && tr.id.replace('row-','');
+                                if (!sym) return;
+                                // if cell is pending or not computed, update it
+                                const cell = tr.querySelector('.reco-cell');
+                                if (!cell) return;
+                                const state = cell.getAttribute('data-reco-state');
+                                if (state !== 'done') {
+                                    // compute after small delay to allow other updates to finish
+                                    setTimeout(() => { updateRecoForRow(sym); }, 50);
+                                }
+                            } catch(e) { /* ignore per-row errors */ }
+                        });
+                    }, 0);
+                }
+                // Rebuild panel-level Reco filters to reflect distinct labels currently present
+                try { buildPanelRecoFilters(); } catch(e) { /* ignore */ }
             } catch (e) { console.warn('updateAllRecoLabels failed', e); }
         }
 
@@ -1124,14 +1197,9 @@
                     const readIndicator = (cellIdx) => {
                         const c = cells[cellIdx];
                         if (!c) return null;
-                        // If percent-mode rendered, cell may contain data-pct
-                        const pctEl = c.querySelector && c.querySelector('[data-pct]');
-                        if (pctEl) {
-                            const pct = parseFloat(pctEl.getAttribute('data-pct'));
-                            if (!isNaN(pct) && cmp) {
-                                return cmp * (1 + (pct / 100));
-                            }
-                        }
+                        // Use parseNumericFromCell which handles data-original and data-pct reconstruction
+                        const n = parseNumericFromCell(c, cmp);
+                        if (!isNaN(n)) return n;
                         return safeNum(c.innerText);
                     };
                     // dynamic rsi index fallback: prefer column map if available
@@ -1165,11 +1233,8 @@
                         const readIndicator = (cellIdx) => {
                             const c = cells[cellIdx];
                             if (!c) return null;
-                            const pctEl = c.querySelector && c.querySelector('[data-pct]');
-                            if (pctEl) {
-                                const pct = parseFloat(pctEl.getAttribute('data-pct'));
-                                if (!isNaN(pct) && cmp) return cmp * (1 + (pct / 100));
-                            }
+                            const n = parseNumericFromCell(c, cmp);
+                            if (!isNaN(n)) return n;
                             return safeNum(c.innerText);
                         };
                         const rsiIdx = (colIndexMap && colIndexMap[rsiKey] !== undefined) ? colIndexMap[rsiKey] : 3;
@@ -1184,19 +1249,55 @@
 
             let score = 0;
             // EMA crossover on selected timeframe (ema_9 vs ema_15)
+            // Small deadband: if difference is tiny (< deadband) treat as equal to avoid flip-flopping
+            const emaDeadband = 0.5; // price units; tweak if needed
             if (ema9 !== null && ema15 !== null) {
-                if (ema9 > ema15) score += 2;
-                if (ema9 < ema15) score -= 2;
-                // confirmation vs a longer EMA if available
-                if (ema65 !== null) {
-                    if (ema9 > ema15 && ema15 > ema65) score += 0.5;
-                    if (ema9 < ema15 && ema15 < ema65) score -= 0.5;
+                const diff = ema9 - ema15;
+                if (Math.abs(diff) >= emaDeadband) {
+                    if (diff > 0) score += 2;
+                    else if (diff < 0) score -= 2;
+                    // confirmation vs a longer EMA if available (use deadband for transitive checks)
+                    if (ema65 !== null) {
+                        if (diff > 0 && (ema15 - ema65) > emaDeadband) score += 0.5;
+                        if (diff < 0 && (ema65 - ema15) > emaDeadband) score -= 0.5;
+                    }
                 }
             }
             // DMA / long-term bias (timeframe-agnostic)
-            if (cmp !== null && ema200 !== null) {
-                if (cmp > ema200) score += 1.5; else if (cmp < ema200) score -= 1.5;
-            }
+            // Prefer using all configured DMA columns (dma_10, dma_20, dma_50, dma_100, dma_200)
+            // and split the previous +/-1.5 bias across them. If none are available,
+            // fall back to cmp vs ema200 (legacy behaviour).
+            try {
+                const dmaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+                if (dmaKeys.length > 0 && cmp !== null) {
+                    const perWeight = 1.5 / dmaKeys.length;
+                    let found = false;
+                    for (const dk of dmaKeys) {
+                        let dv = null;
+                        // try to read from API object first
+                        if (symbolData && typeof symbolData === 'object') dv = safeNum(symbolData[dk]);
+                        // fallback to DOM cell when symbol string or API missing value
+                        if ((dv === null || dv === undefined) && (typeof symbolData === 'string' || (symbolData && (symbolData.Symbol || symbolData.symbol)))) {
+                            const sym = (typeof symbolData === 'string') ? symbolData : (symbolData.Symbol || symbolData.symbol);
+                            const row = document.getElementById(`row-${sym}`);
+                            if (row && colIndexMap[dk] !== undefined) {
+                                const cell = row.querySelectorAll('td')[colIndexMap[dk]];
+                                dv = parseNumericFromCell(cell, cmp);
+                            }
+                        }
+                        if (dv !== null && dv !== undefined && !isNaN(dv)) {
+                            found = true;
+                            if (cmp > dv) score += perWeight; else if (cmp < dv) score -= perWeight;
+                        }
+                    }
+                    // if no DMA values were found, fallback to ema200 if available
+                    if (!found && cmp !== null && ema200 !== null) {
+                        if (cmp > ema200) score += 1.5; else if (cmp < ema200) score -= 1.5;
+                    }
+                } else if (cmp !== null && ema200 !== null) {
+                    if (cmp > ema200) score += 1.5; else if (cmp < ema200) score -= 1.5;
+                }
+            } catch (e) { /* ignore DMA parsing errors and fallback to ema200 below */ }
             // RSI contribution for the selected timeframe
             if (rsi_tf !== null) {
                 if (rsi_tf >= 70) score += 1;
@@ -1205,6 +1306,36 @@
                 else if (rsi_tf <= 45) score -= 0.5;
             }
             return score;
+        }
+
+        // Ensure DMA values exist for visible rows by triggering a 'dma' refresh for rows missing DMA
+        async function ensureDmaForVisibleRows() {
+            try {
+                const tbody = document.getElementById('symbolsTBody');
+                if (!tbody) return;
+                const dmaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('dma_'));
+                if (dmaKeys.length === 0) return;
+                const toRefresh = [];
+                tbody.querySelectorAll('tr').forEach(tr => {
+                    if (tr.style.display === 'none') return;
+                    const cells = tr.querySelectorAll('td');
+                    // if any dma cell is empty or contains '-' schedule refresh
+                    const anyMissing = dmaKeys.some(k => {
+                        const idx = colIndexMap[k];
+                        const cell = cells[idx];
+                        if (!cell) return true;
+                        const txt = (cell.innerText || '').trim();
+                        return txt === '' || txt === '-' || txt === '%' || txt.toLowerCase().includes('muted') || txt === '—' || txt === '–' || txt === '\u2014';
+                    });
+                    if (anyMissing) {
+                        const sym = tr.id && tr.id.replace && tr.id.replace('row-','');
+                        if (sym) toRefresh.push(sym);
+                    }
+                });
+                if (toRefresh.length === 0) return;
+                // Limit concurrency to avoid server overload
+                await runWithConcurrency(toRefresh, async (sym) => { await refreshRow(sym, 'dma'); }, 4);
+            } catch (e) { console.warn('ensureDmaForVisibleRows failed', e); }
         }
 
         // Map numeric score to labelled HTML used in table cells
@@ -1252,11 +1383,14 @@
                     const confLabel = (conf === '0') ? 'none' : conf;
                     parts.push(`EMA65 ${ema65.toFixed(2)} conf ${confLabel}`);
                 }
-                // Include DMA (short/med-term) values in the breakdown if available
+                // Include DMA (short/med-term) values and their contribution in the breakdown if available
                 try {
                     const dmaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
-                    if (dmaKeys.length > 0) {
+                    if (dmaKeys.length > 0 && cmp !== null) {
+                        const perWeight = 1.5 / dmaKeys.length;
                         const dmaParts = [];
+                        const contribParts = [];
+                        let foundAny = false;
                         for (const dk of dmaKeys) {
                             let v = NaN;
                             if (s && s.querySelector) {
@@ -1265,12 +1399,20 @@
                                 if (idx !== undefined && cells[idx]) {
                                     v = parseNumericFromCell(cells[idx], parseFloat(cells[1]?.getAttribute('data-cmp')||NaN));
                                 }
-                            } else if (symbolData && typeof symbolData === 'object') {
+                            }
+                            if ((v === null || v === undefined || isNaN(v)) && symbolData && typeof symbolData === 'object') {
                                 v = parseFloat(symbolData[dk]);
                             }
-                            if (!isNaN(v)) dmaParts.push(`${dk.toUpperCase().replace('_','')} ${v.toFixed(2)}`);
+                            if (!isNaN(v)) {
+                                foundAny = true;
+                                dmaParts.push(`${dk.toUpperCase().replace('_','')} ${v.toFixed(2)}`);
+                                const cw = (cmp > v) ? `+${perWeight.toFixed(2)}` : (cmp < v ? `-${perWeight.toFixed(2)}` : '+0.00');
+                                contribParts.push(`${dk.toUpperCase().replace('_','')}: ${cw}`);
+                            }
                         }
-                        if (dmaParts.length) parts.push(dmaParts.join(' | '));
+                        if (dmaParts.length) parts.push(`DMA: ${dmaParts.join(' | ')}`);
+                        if (contribParts.length) parts.push(`DMA contribs: ${contribParts.join(', ')}`);
+                        // if none found, will still show CMP vs EMA200 later as fallback
                     }
                 } catch(e) { /* ignore dma extraction failures */ }
 
@@ -1336,9 +1478,10 @@
             cmpCell.innerHTML = rawCmp ? rawCmp : '<span class="cell-muted">-</span>';
             if (!isNaN(cmpNum)) cmpCell.setAttribute('data-cmp', String(cmpNum));
             tr.appendChild(cmpCell);
-            // create reco cell so we can attach a tooltip explaining the breakdown
-            const recoTd = td(reco(), 'reco-cell');
-            try { const lblScore = computeRecoScore(s); recoTd.title = buildRecoTooltip(s, lblScore); } catch(e) { /* ignore */ }
+            // create reco cell: show placeholder until indicators are computed and rendered
+            const recoTd = td('<span class="reco-neutral"><i class="fas fa-spinner fa-spin" style="margin-right:6px"></i></span>', 'reco-cell');
+            // mark as pending so other code can opt-in to updating when ready
+            recoTd.setAttribute('data-reco-state', 'pending');
             tr.appendChild(recoTd);
             // Mini 'Trend' candles canvas cell (placed here so it lines up with the 'Trend' header)
             const miniTd = document.createElement('td');
@@ -1481,9 +1624,22 @@
             const max = parseFloat(document.getElementById('filter_pct_max')?.value || NaN);
             const useEma = document.getElementById('filter_apply_ema')?.checked ?? true;
             const useDma = document.getElementById('filter_apply_dma')?.checked ?? true;
-            const showBull = document.getElementById('filter_bull')?.checked ?? true;
-            const showNeutral = document.getElementById('filter_neutral')?.checked ?? true;
-            const showBear = document.getElementById('filter_bear')?.checked ?? true;
+            // Determine Reco visibility settings: prefer dynamic panel filters if present
+            let showBull = true, showNeutral = true, showBear = true;
+            const panelContainer = document.getElementById('panelRecoFilters');
+            if (panelContainer && panelContainer.querySelectorAll('input[type=checkbox]').length > 0) {
+                // Read simplified 3-category panel checkboxes (Bull / Neutral / Bear)
+                const bullCb = document.getElementById('panel_reco_bull');
+                const neutralCb = document.getElementById('panel_reco_neutral');
+                const bearCb = document.getElementById('panel_reco_bear');
+                showBull = !!(bullCb && bullCb.checked);
+                showNeutral = !!(neutralCb && neutralCb.checked);
+                showBear = !!(bearCb && bearCb.checked);
+            } else {
+                showBull = document.getElementById('filter_bull')?.checked ?? true;
+                showNeutral = document.getElementById('filter_neutral')?.checked ?? true;
+                showBear = document.getElementById('filter_bear')?.checked ?? true;
+            }
 
             const tbody = document.getElementById('symbolsTBody');
             tbody.querySelectorAll('tr').forEach(tr => {
@@ -1901,14 +2057,12 @@
                 let recoCell = row.querySelector('.reco-cell');
                 if (recoCell) {
                     try {
-                        const sc = computeRecoScore(d || symbolData);
-                        recoCell.innerHTML = scoreToLabelHtml(sc);
-                        // Use the DOM-row (symbol) when building the tooltip so we read
-                        // the freshly-updated cell values (percent/numeric) instead of
-                        // relying solely on the API object which may not include
-                        // timeframe-specific or freshly-calculated fields.
-                        try { recoCell.title = buildRecoTooltip(symbol, sc); } catch(e) { /* ignore */ }
-                    } catch (e) { recoCell.innerHTML = '<span class="reco-neutral">Neutral</span>'; }
+                        // mark as pending; defer computation so all cells (EMA/DMA/RSI/CMP)
+                        // stabilize first. We still attempt a near-immediate recompute
+                        // shortly after to keep UI responsive when data is available.
+                        recoCell.setAttribute('data-reco-state', 'pending');
+                        setTimeout(() => { updateRecoForRow(symbol); }, 80);
+                    } catch (e) { /* ignore */ }
                 }
             } catch(e) { /* ignore */ }
         }
