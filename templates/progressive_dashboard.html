@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Progressive Trading Scanner Dashboard</title>
+    <title>Trading Scanner Dashboard</title>
     <link rel="stylesheet" href="simple-theme.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/toastr.js/latest/toastr.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -164,6 +164,9 @@
         .action-chip { display:inline-block; min-width:26px; padding:0.15rem 0.4rem; margin:0 0.1rem; border-radius:4px; text-align:center; cursor:pointer; background:var(--bg-accent); color:var(--text-primary); border:1px solid var(--border-color); font-size:0.85rem; }
         .chip-running { animation: blink 1s linear infinite; }
         @keyframes blink { 0%{opacity:1}50%{opacity:0.2}100%{opacity:1} }
+    .action-popup { position:absolute; z-index:2000; background:var(--bg-primary); border:1px solid var(--border-color); padding:6px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.12); display:flex; gap:6px; }
+    .action-popup .popup-btn { padding:4px 8px; border-radius:4px; cursor:pointer; border:1px solid var(--border-color); background:var(--bg-accent); font-size:0.82rem; }
+    .popup-icon { margin-left:6px; cursor:pointer; color:var(--text-secondary); }
     </style>
 </head>
 <body>
@@ -173,7 +176,7 @@
         <!-- Top row: title + timestamp + accordion toggle -->
         <div class="header-top">
             <div class="header-top-left">
-                <h1 class="header-title"><i class="fas fa-chart-line"></i> Progressive Trading Scanner</h1>
+                <h1 class="header-title"><i class="fas fa-chart-line"></i> Trading Scanner</h1>
             </div>
             <div class="header-top-right">
                 <div class="last-refresh" id="pageLoadTime">Last Refresh: --</div>
@@ -454,7 +457,7 @@
                 thead.innerHTML = '';
                 const tr = document.createElement('tr');
                 // base columns
-                const baseCols = [ {k:'Symbol', t:'Symbol', cls:'symbol-col'}, {k:'CMP', t:'CMP'}, {k:'Reco', t:'Reco'} ];
+                const baseCols = [ {k:'Symbol', t:'Symbol', cls:'symbol-col'}, {k:'CMP', t:'CMP'}, {k:'Reco', t:'Reco'}, {k:'Trend', t:'Trend'} ];
                 let idx = 0;
                 colIndexMap = {};
                 baseCols.forEach(c => { const th = document.createElement('th'); if (c.cls) th.className = c.cls; th.setAttribute('data-key', c.k); th.textContent = c.t; tr.appendChild(th); colIndexMap[c.k] = idx++; });
@@ -462,23 +465,23 @@
                 // RSI columns
                 for (const p of rsi_periods) {
                     const key = `rsi_${p}`;
-                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `RSI(${p})`; tr.appendChild(th); colIndexMap[key] = idx++;
+                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `RSI-${p}`; tr.appendChild(th); colIndexMap[key] = idx++;
                 }
 
                 // EMA columns
                 for (const p of ema_periods) {
                     const key = `ema_${p}`;
-                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `EMA(${p})`; tr.appendChild(th); colIndexMap[key] = idx++;
+                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `EMA-${p}`; tr.appendChild(th); colIndexMap[key] = idx++;
                 }
 
                 // DMA columns
                 for (const p of dma_periods) {
                     const key = `dma_${p}`;
-                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `DMA(${p})`; tr.appendChild(th); colIndexMap[key] = idx++;
+                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `DMA-${p}`; tr.appendChild(th); colIndexMap[key] = idx++;
                 }
 
                 // Actions
-                const thActions = document.createElement('th'); thActions.textContent = 'Actions'; tr.appendChild(thActions); colIndexMap['Actions'] = idx++;
+                const thActions = document.createElement('th'); thActions.textContent = 'Sync'; tr.appendChild(thActions); colIndexMap['Sync'] = idx++;
 
                 thead.appendChild(tr);
 
@@ -491,6 +494,12 @@
         window.addEventListener('resize', function() { computeHeaderOffset(); });
         // Also compute after initial load (in case called earlier)
         window.addEventListener('load', function() { computeHeaderOffset(); });
+
+        // Wire timeframe selector to refresh mini-candles (debounced)
+        try {
+            const topTf = document.getElementById('timeframeSelect');
+            if (topTf) topTf.addEventListener('change', debounce(() => { refreshAllMiniSparks(); computeHeaderOffset(); }, 400));
+        } catch (e) { /* ignore */ }
 
         // Load symbols from API
         async function loadSymbols() {
@@ -586,6 +595,105 @@
             }
             // apply advanced filters after rendering
             applyFilters();
+        }
+
+        // Draw small candlesticks into a canvas for last 5 points
+        function drawMiniCandles(canvas, ohlcArray) {
+            try {
+                if (!canvas || !Array.isArray(ohlcArray) || ohlcArray.length === 0) return;
+                const ctx = canvas.getContext('2d');
+                const W = canvas.width; const H = canvas.height;
+                // Clear
+                ctx.clearRect(0,0,W,H);
+                // Use last 5
+                const data = ohlcArray.slice(-5);
+                // Build min/max
+                const lows = data.map(d => d[2]);
+                const highs = data.map(d => d[1]);
+                const minV = Math.min(...lows); const maxV = Math.max(...highs);
+                const pad = (maxV - minV) * 0.08 || 1;
+                const scale = (v) => H - 2 - ((v - (minV - pad)) / ((maxV + pad) - (minV - pad))) * (H - 4);
+                const barW = Math.max(4, Math.floor(W / data.length) - 4);
+                const gap = (W - (barW * data.length)) / (data.length + 1);
+                let x = gap;
+                for (const d of data) {
+                    const o = Number(d[0]), h = Number(d[1]), l = Number(d[2]), c = Number(d[3]);
+                    const yO = scale(o), yH = scale(h), yL = scale(l), yC = scale(c);
+                    const isBull = c >= o;
+                    ctx.strokeStyle = isBull ? '#10b981' : '#ef4444';
+                    ctx.fillStyle = ctx.strokeStyle;
+                    ctx.lineWidth = 1.2;
+                    // wick
+                    ctx.beginPath(); ctx.moveTo(x + barW/2, yH); ctx.lineTo(x + barW/2, yL); ctx.stroke();
+                    // body
+                    const top = Math.min(yO, yC); const height = Math.max(1, Math.abs(yC - yO));
+                    if (isBull) {
+                        ctx.fillRect(x, top, barW, height);
+                    } else {
+                        ctx.fillRect(x, top, barW, height);
+                    }
+                    x += barW + gap;
+                }
+            } catch (e) { console.warn('drawMiniCandles failed', e); }
+        }
+
+        // Load mini spark for a symbol using /api/chart-data (prefer OHLC produced in chartData)
+        async function loadMiniSpark(symbol) {
+            try {
+                const tf = document.getElementById('timeframeSelect')?.value || '15mins';
+                // Optionally trigger a scanner run for timeframe to ensure OHLC aligned; keep lightweight - call only if not present
+                // We'll try to fetch chart-data directly and fall back to running quick server compute if no OHLC
+                const res = await fetch(`/api/chart-data/rsi/${symbol}`, { cache: 'no-store' }).catch(() => null);
+                let payload = null;
+                if (res && res.ok) payload = await res.json().catch(() => null);
+                // If RSI feed didn't include OHLC, try DMA or EMA
+                if (!payload || !payload.chartData || !payload.chartData.datasets) {
+                    const r2 = await fetch(`/api/chart-data/dma/${symbol}`, { cache: 'no-store' }).catch(() => null);
+                    if (r2 && r2.ok) payload = await r2.json().catch(() => null);
+                }
+                if (!payload || !payload.chartData || !Array.isArray(payload.chartData.datasets)) return;
+                // Find OHLC dataset
+                const ohlcDs = payload.chartData.datasets.find(d => d.label && d.label.toUpperCase() === 'OHLC');
+                // If OHLC not present, try Close line dataset -> convert to OHLC-like bars (open/close equal)
+                let ohlcArray = null;
+                if (ohlcDs && Array.isArray(ohlcDs.data) && ohlcDs.data.length > 0) {
+                    // ohlcDs.data may be arrays or objects; normalize to [o,h,l,c]
+                    if (Array.isArray(ohlcDs.data[0])) ohlcArray = ohlcDs.data.slice();
+                    else if (typeof ohlcDs.data[0] === 'object' && 'c' in ohlcDs.data[0]) {
+                        ohlcArray = ohlcDs.data.map(pt => [pt.o || pt[0] || pt.open, pt.h || pt[1] || pt.high, pt.l || pt[2] || pt.low, pt.c || pt[3] || pt.close]);
+                    }
+                } else {
+                    // try close dataset
+                    const closeDs = payload.chartData.datasets.find(d => d.label && /close/i.test(d.label));
+                    if (closeDs && Array.isArray(closeDs.data) && closeDs.data.length > 0) {
+                        ohlcArray = closeDs.data.map(v => [v, v, v, v]);
+                    }
+                }
+                const canvas = document.getElementById(`mini-${symbol}`);
+                if (!canvas || !ohlcArray) return;
+                drawMiniCandles(canvas, ohlcArray);
+            } catch (e) { console.warn('loadMiniSpark failed', e); }
+        }
+
+        // Refresh all mini sparks (used when timeframe selector changes)
+        // NOTE: lazy-loading via IntersectionObserver caused issues for some users.
+        // Roll back to immediate loading: always attempt to load the mini spark when requested.
+        function refreshAllMiniSparks() {
+            const list = symbols.map(s => s.Symbol || s);
+            for (const sym of list) {
+                try {
+                    loadMiniSpark(sym).catch(() => {});
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        // observeMiniCanvas no longer uses IntersectionObserver. Call loadMiniSpark immediately.
+        const miniObserver = null;
+
+        function observeMiniCanvas(symbol) {
+            try {
+                loadMiniSpark(symbol).catch(() => {});
+            } catch (e) { /* ignore */ }
         }
 
         // Compute numeric recommendation score for a symbol (used for sorting)
@@ -772,6 +880,12 @@
             if (!isNaN(cmpNum)) cmpCell.setAttribute('data-cmp', String(cmpNum));
             tr.appendChild(cmpCell);
             tr.appendChild(td(reco(), 'reco-cell'));
+            // Mini 'Trend' candles canvas cell (placed here so it lines up with the 'Trend' header)
+            const miniTd = document.createElement('td');
+            miniTd.style.width = '80px';
+            miniTd.style.textAlign = 'center';
+            miniTd.innerHTML = `<canvas id="mini-${s}" width="80" height="20" style="width:80px;height:20px"></canvas>`;
+            tr.appendChild(miniTd);
             // Render RSI columns dynamically if present in colIndexMap
             const rsiKeys = Object.keys(colIndexMap).filter(k => k.startsWith('rsi_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
             rsiKeys.forEach(k => tr.appendChild(td(colorRsiHtml(getCellVal(k)))));
@@ -786,13 +900,23 @@
             // LastUpdate column removed to match legacy compact table
 
             // Actions with per-scanner controls and status badges (reuse chip/time ids)
+            // Show per-scanner chips so updateScannerChip can update loader icon and execution duration.
+            // Keep the compact 'All' chip and popup for additional actions.
             const actionsHtml = `
-                <span id="chip-${s}-rsi" class="action-chip status-idle" title="RSI" onclick="runScanner('${s}', 'rsi')">R</span>
-                <span id="chip-${s}-ema" class="action-chip status-idle" title="EMA" onclick="runScanner('${s}', 'ema')">E</span>
-                <span id="chip-${s}-dma" class="action-chip status-idle" title="DMA" onclick="runScanner('${s}', 'dma')">D</span>
                 <span id="chip-${s}-all" class="action-chip status-idle" title="Run All" onclick="retryAllScannersForSymbol('${s}')">All</span>
+                <i class="fas fa-ellipsis-h popup-icon" title="More" onclick="toggleActionPopup(event, '${s}')"></i>
+                <div id="action-popup-${s}" class="action-popup" style="display:none;">
+                    <div style="display:flex; gap:6px; margin-bottom:6px;">
+                        <span id="chip-${s}-rsi" class="action-chip status-idle" title="Run RSI" onclick="runScanner('${s}','rsi')">R</span>
+                        <span id="chip-${s}-ema" class="action-chip status-idle" title="Run EMA" onclick="runScanner('${s}','ema')">E</span>
+                        <span id="chip-${s}-dma" class="action-chip status-idle" title="Run DMA" onclick="runScanner('${s}','dma')">D</span>
+                    </div>
+                </div>
             `;
-            tr.appendChild(td(actionsHtml));
+            const actionsCell = td(actionsHtml);
+            actionsCell.style.position = 'relative';
+            tr.appendChild(actionsCell);
+
 
             // If the symbolData lacks some newer fields (rsi_5, ema_21, dma_100/dma_200),
             // request per-symbol analysis to populate them. This handles cases where
@@ -815,6 +939,8 @@
                             if (needsDma) refreshRow(rowId, 'dma');
                         } catch(e) { /* ignore */ }
                     }, 200);
+                            // Register mini canvas for lazy loading (IntersectionObserver)
+                            try { observeMiniCanvas(s); } catch(e) { /* ignore */ }
                 }
             })(symbolData, s);
 
@@ -913,6 +1039,59 @@
                 tr.style.display = visible ? '' : 'none';
             });
         }
+
+        // Toggle/show the per-row action popup (R/E/D/All)
+        function toggleActionPopup(evt, symbol) {
+            try {
+                evt = evt || window.event;
+                evt.stopPropagation();
+                const popup = document.getElementById(`action-popup-${symbol}`);
+                if (!popup) return;
+                // position popup near the icon, but avoid overflowing the parent's right edge (scrollbar area)
+                const icon = evt.currentTarget || evt.target;
+                const rect = icon.getBoundingClientRect();
+                const parentRect = icon.parentElement.getBoundingClientRect();
+                const isHidden = !popup || popup.style.display === 'none' || popup.style.display === '';
+                if (isHidden) {
+                    // show it hidden to measure size
+                    popup.style.display = 'flex';
+                    popup.style.visibility = 'hidden';
+                    // measure
+                    const popupWidth = popup.offsetWidth || 120;
+                    const popupHeight = popup.offsetHeight || 28;
+                    // prefer left = -110 (place popup to left of icon), but clamp so popup stays inside the parent
+                    // Using negative left moves the popup to the left of the icon (into the cell area);
+                    // clamp between minLeft (prevent too far-left) and maxLeft (prevent overflow to right)
+                    const preferredLeft = -110;
+                    const maxLeft = Math.max(0, parentRect.width - popupWidth - 8); // right-most allowed inside parent
+                    const minLeft = Math.min(0, -popupWidth + 8); // left-most allowed so popup doesn't fully disappear
+                    let left = preferredLeft;
+                    if (left > maxLeft) left = maxLeft;
+                    if (left < minLeft) left = minLeft;
+                    const top = (rect.bottom - parentRect.top + 6);
+                    popup.style.left = left + 'px';
+                    popup.style.top = top + 'px';
+                    popup.style.visibility = 'visible';
+                } else {
+                    popup.style.display = 'none';
+                }
+            } catch (e) { console.warn('toggleActionPopup', e); }
+        }
+
+        function hideActionPopup(symbol) {
+            try {
+                const popup = document.getElementById(`action-popup-${symbol}`);
+                if (popup) popup.style.display = 'none';
+            } catch (e) {}
+        }
+
+        // Close any open action popups when clicking elsewhere
+        document.addEventListener('click', function(e) {
+            try {
+                const openPopups = document.querySelectorAll('.action-popup');
+                openPopups.forEach(p => { if (p.style.display !== 'none') p.style.display = 'none'; });
+            } catch (e) {}
+        });
 
         // Update scanner chip status (display time inside chip; running shows blink)
         function updateScannerChip(symbol, scanner, status, time = null, error = null) {
