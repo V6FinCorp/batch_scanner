@@ -211,16 +211,7 @@
                             <i class="fas fa-sync"></i> Refresh
                         </button>
                     </div>
-                    <div class="timeframe-selector">
-                        <label>TimeFrame:</label>
-                        <select id="timeframeSelect" class="form-select">
-                                <option value="5mins">5 mins</option>
-                            <option value="15mins" selected>15 mins</option>
-                            <option value="30mins">30 mins</option>
-                            <option value="1hour">1 hour</option>
-                            <option value="daily">Daily</option>
-                        </select>
-                    </div>
+                    <!-- timeframe-selector moved to symbols panel-actions for compact layout -->
                     <!-- EMA/DMA as % moved to symbols panel header (top-right) -->
                     <div id="filters" style="display:flex; gap:0.5rem; align-items:center;">
                         <label style="margin-right:0.25rem;">Reco:</label>
@@ -255,10 +246,20 @@
                 <div class="panel-actions">
                     <span id="symbolStats">0 symbols loaded</span>
                     <span id="progressInfo" style="margin-left: 1rem;"></span>
-                    <span style="margin-left:1rem; display:flex; align-items:center; gap:0.4rem;">
+                    <div style="margin-left:1rem; display:flex; align-items:center; gap:0.6rem;">
                         <label for="togglePct" style="margin:0; font-size:0.9rem; color:var(--text-secondary);">EMA/DMA as %</label>
                         <input type="checkbox" id="togglePct" />
-                    </span>
+                    </div>
+                    <div style="margin-left:1rem; display:flex; align-items:center; gap:0.5rem;">
+                        <label style="margin-right:0.25rem;">TimeFrame:</label>
+                        <select id="timeframeSelect" class="form-select">
+                            <option value="5mins">5 mins</option>
+                            <option value="15mins" selected>15 mins</option>
+                            <option value="30mins">30 mins</option>
+                            <option value="1hour">1 hour</option>
+                            <option value="daily">Daily</option>
+                        </select>
+                    </div>
                 </div>
             </div>
             
@@ -602,8 +603,22 @@
             try {
                 if (!canvas || !Array.isArray(ohlcArray) || ohlcArray.length === 0) return;
                 const ctx = canvas.getContext('2d');
-                const W = canvas.width; const H = canvas.height;
-                // Clear
+                // Handle devicePixelRatio to ensure crisp rendering and force a full redraw
+                const dpr = window.devicePixelRatio || 1;
+                // CSS size (may be set via style) -> use getBoundingClientRect for accurate CSS pixels
+                const rect = canvas.getBoundingClientRect();
+                const cssW = Math.max(1, Math.round(rect.width));
+                const cssH = Math.max(1, Math.round(rect.height));
+                // Set actual canvas pixel size for DPR and clear
+                if (canvas.width !== Math.round(cssW * dpr) || canvas.height !== Math.round(cssH * dpr)) {
+                    canvas.width = Math.round(cssW * dpr);
+                    canvas.height = Math.round(cssH * dpr);
+                    canvas.style.width = cssW + 'px';
+                    canvas.style.height = cssH + 'px';
+                }
+                ctx.setTransform(1,0,0,1,0,0);
+                ctx.scale(dpr, dpr);
+                const W = cssW; const H = cssH;
                 ctx.clearRect(0,0,W,H);
                 // Use last 5
                 const data = ohlcArray.slice(-5);
@@ -641,49 +656,112 @@
         async function loadMiniSpark(symbol) {
             try {
                 const tf = document.getElementById('timeframeSelect')?.value || '15mins';
-                // Optionally trigger a scanner run for timeframe to ensure OHLC aligned; keep lightweight - call only if not present
-                // We'll try to fetch chart-data directly and fall back to running quick server compute if no OHLC
-                const res = await fetch(`/api/chart-data/rsi/${symbol}`, { cache: 'no-store' }).catch(() => null);
+                const q = `?timeframe=${encodeURIComponent(tf)}`;
                 let payload = null;
-                if (res && res.ok) payload = await res.json().catch(() => null);
-                // If RSI feed didn't include OHLC, try DMA or EMA
-                if (!payload || !payload.chartData || !payload.chartData.datasets) {
-                    const r2 = await fetch(`/api/chart-data/dma/${symbol}`, { cache: 'no-store' }).catch(() => null);
-                    if (r2 && r2.ok) payload = await r2.json().catch(() => null);
+
+                // Prefer OHLC-only endpoint which returns resampled OHLC (does not recompute indicators)
+                try {
+                    const ohlcRes = await fetch(`/api/chart-data/ohlc/${symbol}${q}`, { cache: 'no-store' }).catch(() => null);
+                    if (ohlcRes && ohlcRes.ok) {
+                        const p = await ohlcRes.json().catch(() => null);
+                        if (p && p.chartData && Array.isArray(p.chartData.datasets) && p.chartData.datasets.length > 0) {
+                            payload = p;
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+
+                // Do NOT fallback to indicator endpoints here. For mini-candles we only need OHLC
+                // If OHLC isn't available, draw placeholder — avoid triggering EMA/DMA/RSI computations.
+
+                const canvas = document.getElementById(`mini-${symbol}`);
+                if (!canvas) return false;
+                // Debug: show which source provided data
+                try { console.debug(`[mini] loadMiniSpark: symbol=${symbol} payloadSource=${payload && payload.scannerType ? payload.scannerType : 'ohlc'} datasets=${payload && payload.chartData && Array.isArray(payload.chartData.datasets) ? payload.chartData.datasets.length : 0}`); } catch(e){}
+
+                if (!payload || !payload.chartData || !Array.isArray(payload.chartData.datasets) || payload.chartData.datasets.length === 0) {
+                    // No data found: clear canvas and draw muted placeholder
+                    try {
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0,0,canvas.width,canvas.height);
+                        ctx.fillStyle = 'rgba(107,114,128,0.12)';
+                        ctx.fillRect(0,0,canvas.width,canvas.height);
+                        ctx.fillStyle = 'rgba(55,65,81,0.6)';
+                        ctx.font = '10px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('-', canvas.width/2, canvas.height/2);
+                    } catch (e) { /* ignore drawing errors */ }
+                    return false;
                 }
-                if (!payload || !payload.chartData || !Array.isArray(payload.chartData.datasets)) return;
+
                 // Find OHLC dataset
                 const ohlcDs = payload.chartData.datasets.find(d => d.label && d.label.toUpperCase() === 'OHLC');
-                // If OHLC not present, try Close line dataset -> convert to OHLC-like bars (open/close equal)
                 let ohlcArray = null;
                 if (ohlcDs && Array.isArray(ohlcDs.data) && ohlcDs.data.length > 0) {
-                    // ohlcDs.data may be arrays or objects; normalize to [o,h,l,c]
                     if (Array.isArray(ohlcDs.data[0])) ohlcArray = ohlcDs.data.slice();
-                    else if (typeof ohlcDs.data[0] === 'object' && 'c' in ohlcDs.data[0]) {
+                    else if (typeof ohlcDs.data[0] === 'object' && ('c' in ohlcDs.data[0] || 'close' in ohlcDs.data[0])) {
                         ohlcArray = ohlcDs.data.map(pt => [pt.o || pt[0] || pt.open, pt.h || pt[1] || pt.high, pt.l || pt[2] || pt.low, pt.c || pt[3] || pt.close]);
                     }
-                } else {
-                    // try close dataset
+                }
+
+                // fallback: close dataset
+                if (!ohlcArray) {
                     const closeDs = payload.chartData.datasets.find(d => d.label && /close/i.test(d.label));
                     if (closeDs && Array.isArray(closeDs.data) && closeDs.data.length > 0) {
                         ohlcArray = closeDs.data.map(v => [v, v, v, v]);
                     }
                 }
-                const canvas = document.getElementById(`mini-${symbol}`);
-                if (!canvas || !ohlcArray) return;
+
+                if (!ohlcArray) {
+                    // draw placeholder
+                    try {
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0,0,canvas.width,canvas.height);
+                        ctx.fillStyle = 'rgba(107,114,128,0.12)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+                        ctx.fillStyle = 'rgba(55,65,81,0.6)'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('-', canvas.width/2, canvas.height/2);
+                    } catch(e){}
+                    return false;
+                }
+
+                // Successful draw
+                // Force clear before draw to ensure redraw on all browsers
+                try { const ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); } catch(e){}
                 drawMiniCandles(canvas, ohlcArray);
-            } catch (e) { console.warn('loadMiniSpark failed', e); }
+                try { console.debug(`[mini] drew mini-candles for ${symbol} (points=${ohlcArray.length})`); } catch(e){}
+                return true;
+            } catch (e) { console.warn('loadMiniSpark failed', e); return false; }
         }
 
         // Refresh all mini sparks (used when timeframe selector changes)
         // NOTE: lazy-loading via IntersectionObserver caused issues for some users.
         // Roll back to immediate loading: always attempt to load the mini spark when requested.
-        function refreshAllMiniSparks() {
+        async function refreshAllMiniSparks() {
             const list = symbols.map(s => s.Symbol || s);
-            for (const sym of list) {
-                try {
-                    loadMiniSpark(sym).catch(() => {});
-                } catch (e) { /* ignore */ }
+            if (!list || list.length === 0) return;
+            const tf = document.getElementById('timeframeSelect')?.value || '15mins';
+            try {
+                // Show persistent progress so user knows refresh is ongoing
+                showModalProgress(`Refreshing Trend mini-candles (${tf})...`, 'info');
+            } catch (e) { /* ignore */ }
+
+            // Launch all loads in parallel and wait for completion; count successful draws
+            const promises = list.map(sym => {
+                try { return loadMiniSpark(sym).catch(() => false); } catch (e) { return Promise.resolve(false); }
+            });
+            try {
+                const results = await Promise.all(promises);
+                const successCount = results.filter(Boolean).length;
+                try { clearModalProgress(); } catch(e){}
+                if (successCount === list.length) {
+                    try { toastr.success(`Trend mini-candles updated (${successCount}/${list.length})`, 'Updated'); } catch(e){}
+                } else if (successCount > 0) {
+                    try { toastr.warning(`Trend mini-candles partially updated (${successCount}/${list.length})`, 'Partial'); } catch(e){}
+                } else {
+                    try { toastr.error('No mini-candle data available for selected timeframe', 'No Data'); } catch(e){}
+                }
+            } catch (e) {
+                try { clearModalProgress(); } catch(e){}
+                try { toastr.warning('Some mini-candles failed to update', 'Partial'); } catch(e){}
             }
         }
 
@@ -1704,29 +1782,50 @@
                     // Fetch chart data for all scanners (rsi, ema, dma) and merge into a single combined chartData
                     const scannersToFetch = ['rsi','ema','dma'];
                     // Try to fetch each scanner's chart-data with retries so we tolerate brief server processing delays
+                    // First fetch OHLC resampled for the requested timeframe (preferred)
+                    const q = `?timeframe=${encodeURIComponent(tf)}`;
+                    let combined = { labels: null, datasets: [] };
+                    const seenLabels = new Set();
+                    try {
+                        const ohlcRes = await fetch(`/api/chart-data/ohlc/${symbol}${q}`, { cache: 'no-store' }).catch(() => null);
+                        if (ohlcRes && ohlcRes.ok) {
+                            const ohlcPayload = await ohlcRes.json().catch(() => null);
+                            if (ohlcPayload && ohlcPayload.chartData) {
+                                const part = ohlcPayload.chartData;
+                                if (Array.isArray(part.labels)) combined.labels = part.labels.slice();
+                                if (Array.isArray(part.datasets)) {
+                                    for (const ds of part.datasets) {
+                                        const label = (ds && ds.label) ? ds.label : JSON.stringify(ds);
+                                        if (seenLabels.has(label)) continue;
+                                        seenLabels.add(label);
+                                        const copy = Object.assign({}, ds);
+                                        if (Array.isArray(ds.data)) copy.data = ds.data.slice();
+                                        combined.datasets.push(copy);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    // Then fetch indicator datasets (rsi/ema/dma) to overlay on top if available
                     const fetchPromises = scannersToFetch.map(async s => {
-                        const payload = await fetchChartDataWithRetry(s, symbol, 8, 400).catch(e => null);
-                        if (!payload) return { error: `No data for ${s}` };
-                        return payload;
+                        try {
+                            const payload = await fetchChartDataWithRetry(s, symbol, 6, 400).catch(() => null);
+                            return payload;
+                        } catch (e) { return null; }
                     });
                     const fetches = await Promise.all(fetchPromises);
 
-                    // Build combined chartData
-                    const combined = { labels: null, datasets: [] };
-                    const seenLabels = new Set();
                     for (const resp of fetches) {
                         if (!resp || resp.error || !resp.chartData) continue;
                         const part = resp.chartData;
                         if (!combined.labels && Array.isArray(part.labels)) combined.labels = part.labels.slice();
                         if (Array.isArray(part.datasets)) {
                             for (const ds of part.datasets) {
-                                // Avoid duplicate dataset labels
                                 const label = (ds && ds.label) ? ds.label : JSON.stringify(ds);
                                 if (seenLabels.has(label)) continue;
                                 seenLabels.add(label);
-                                // Clone dataset to avoid mutations
                                 const copy = Object.assign({}, ds);
-                                // Ensure data arrays are copied
                                 if (Array.isArray(ds.data)) copy.data = ds.data.slice();
                                 combined.datasets.push(copy);
                             }

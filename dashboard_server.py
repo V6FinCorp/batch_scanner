@@ -233,6 +233,15 @@ def get_chart_data(scanner_type, symbol):
         return jsonify({'error': 'Scanner manager not available'}), 500
     return jsonify(scanner_manager.get_symbol_chart_data(scanner_type, symbol))
 
+
+@app.route('/api/chart-data/ohlc/<symbol>')
+def get_ohlc_chart(symbol):
+    """Return OHLC-only chart data resampled to a requested timeframe via ?timeframe=..."""
+    if not scanner_manager:
+        return jsonify({'error': 'Scanner manager not available'}), 500
+    timeframe = request.args.get('timeframe', '15mins')
+    return jsonify(scanner_manager.get_ohlc_chart_data(symbol, timeframe))
+
 @app.route('/api/symbol-analysis/<scanner_type>/<symbol>')
 def get_symbol_analysis(scanner_type, symbol):
     """Get analysis for a specific symbol and scanner type with caching"""

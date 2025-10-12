@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import logging
+import glob
 import threading
 import traceback
 from typing import Dict, List, Any, Optional, Union
@@ -810,6 +811,90 @@ class ScannerManager:
         except Exception as e:
             logger.exception('Error generating symbol chart data')
             return self.report_error('critical', f'Unhandled exception: {e}', {'symbol': symbol, 'scannerType': scanner_type})
+
+    def get_ohlc_chart_data(self, symbol: str, timeframe: str = '15mins') -> Dict[str, Any]:
+        """Load combined OHLC CSV for a symbol, resample to the requested timeframe, and return chart data."""
+        try:
+            # Find any combined CSV for this symbol (e.g., SYMBOL_5_combined.csv)
+            data_dir = os.path.join(self.scanners_dir, 'data', symbol)
+            if not os.path.isdir(data_dir):
+                return self.report_error('data', 'Symbol data directory not found', {'symbol': symbol, 'path': data_dir})
+
+            patterns = ['*_combined.csv', f'{symbol}_*_combined.csv']
+            files = []
+            for p in patterns:
+                files = glob.glob(os.path.join(data_dir, p))
+                if files:
+                    break
+
+            if not files:
+                return self.report_error('data', 'No combined OHLC CSV found for symbol', {'symbol': symbol, 'dir': data_dir})
+
+            # Prefer the most recent file (by name sort)
+            csv_file = sorted(files)[-1]
+            df = pd.read_csv(csv_file)
+            if df.empty:
+                return self.report_error('data', 'Combined CSV is empty', {'file': csv_file})
+
+            # Normalize timestamp column
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+            elif 'time' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['time'])
+            elif 'date' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['date'])
+            else:
+                # Try to infer index as timestamps
+                try:
+                    df.index = pd.to_datetime(df.index)
+                    df = df.reset_index().rename(columns={'index': 'timestamp'})
+                except Exception:
+                    return self.report_error('data', 'No timestamp column found in combined CSV', {'file': csv_file})
+
+            # Ensure OHLC columns exist or fallback to close-only
+            if 'open' not in df.columns:
+                df['open'] = df.get('close')
+            if 'high' not in df.columns:
+                df['high'] = df[['open', 'close']].max(axis=1)
+            if 'low' not in df.columns:
+                df['low'] = df[['open', 'close']].min(axis=1)
+            if 'close' not in df.columns:
+                # try other common column names
+                for alt in ['Close', 'close_price', 'last']:
+                    if alt in df.columns:
+                        df['close'] = df[alt]
+                        break
+            if 'close' not in df.columns:
+                return self.report_error('data', 'No close column available in combined CSV', {'file': csv_file})
+
+            # Map timeframe string to pandas resample rule
+            tf_map = {
+                '5mins': '5T', '15mins': '15T', '30mins': '30T', '1hour': '1H', '4hours': '4H',
+                'daily': '1D', 'weekly': '7D', 'monthly': '30D'
+            }
+            rule = tf_map.get(timeframe, '15T')
+
+            # Set index and resample
+            df.set_index('timestamp', inplace=True)
+            try:
+                ohlc = df.resample(rule).agg({'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last'})
+            except Exception as e:
+                return self.report_error('data', f'Error resampling OHLC: {e}', {'symbol': symbol, 'file': csv_file})
+
+            ohlc = ohlc.dropna()
+            if ohlc.empty:
+                return self.report_error('data', 'Resampled OHLC is empty for timeframe', {'symbol': symbol, 'timeframe': timeframe})
+
+            # Reset index and pass to prepare_chart_data
+            chart_df = ohlc.reset_index()
+            chart_data = self.prepare_chart_data(chart_df, 'ohlc')
+            if not chart_data:
+                return self.report_error('data', 'Failed to prepare chart data from OHLC', {'symbol': symbol})
+
+            return {'chartData': chart_data, 'symbol': symbol, 'scannerType': 'ohlc'}
+        except Exception as e:
+            logger.exception('Error generating OHLC chart data')
+            return self.report_error('critical', f'Unhandled exception: {e}', {'symbol': symbol})
     
     def get_symbol_analysis(self, scanner_type: str, symbol: str) -> Dict[str, Any]:
         """Get cached analysis for a specific symbol or compute if not available"""
