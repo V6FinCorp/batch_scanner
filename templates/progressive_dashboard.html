@@ -372,7 +372,14 @@
             const pctEl = document.getElementById('togglePct');
             if (pctEl) {
                 pctEl.checked = showPctDiff;
-                pctEl.addEventListener('change', () => { showPctDiff = pctEl.checked; localStorage.setItem('showPctDiff', JSON.stringify(showPctDiff)); renderSymbolsTable(); });
+                // When toggling EMA/DMA percent view we must not re-render the entire table
+                // (that causes mini-candles and other fields to be redrawn). Instead only
+                // update the EMA/DMA cells in-place.
+                pctEl.addEventListener('change', () => {
+                    showPctDiff = pctEl.checked;
+                    localStorage.setItem('showPctDiff', JSON.stringify(showPctDiff));
+                    try { updateEmaDmaPctDisplay(); } catch(e) { console.warn('updateEmaDmaPctDisplay failed', e); }
+                });
             }
             loadDarkModePreference();
             
@@ -461,7 +468,18 @@
                 const baseCols = [ {k:'Symbol', t:'Symbol', cls:'symbol-col'}, {k:'CMP', t:'CMP'}, {k:'Reco', t:'Reco'}, {k:'Trend', t:'Trend'} ];
                 let idx = 0;
                 colIndexMap = {};
-                baseCols.forEach(c => { const th = document.createElement('th'); if (c.cls) th.className = c.cls; th.setAttribute('data-key', c.k); th.textContent = c.t; tr.appendChild(th); colIndexMap[c.k] = idx++; });
+                baseCols.forEach(c => {
+                    const th = document.createElement('th');
+                    if (c.cls) th.className = c.cls;
+                    th.setAttribute('data-key', c.k);
+                    th.textContent = c.t;
+                    // Add tooltip on Reco header explaining calculation
+                    if (c.k === 'Reco') {
+                        th.title = 'Reco = EMA(9/15) crossover (±2) + EMA confirmation vs longer EMA (±0.5) + CMP vs EMA200 (±1.5) + RSI(timeframe) (±1 / ±0.5)';
+                    }
+                    tr.appendChild(th);
+                    colIndexMap[c.k] = idx++;
+                });
 
                 // RSI columns
                 for (const p of rsi_periods) {
@@ -499,7 +517,7 @@
         // Wire timeframe selector to refresh mini-candles (debounced)
         try {
             const topTf = document.getElementById('timeframeSelect');
-            if (topTf) topTf.addEventListener('change', debounce(() => { refreshAllMiniSparks(); computeHeaderOffset(); }, 400));
+            if (topTf) topTf.addEventListener('change', debounce(() => { refreshAllMiniSparks(); computeHeaderOffset(); updateAllEmaForTimeframe(); }, 400));
         } catch (e) { /* ignore */ }
 
         // Load symbols from API
@@ -774,7 +792,309 @@
             } catch (e) { /* ignore */ }
         }
 
+        // Compute simple EMA for a numeric array (close prices). Returns array of EMA values (same length) or null.
+        function computeEMAArray(values, period) {
+            if (!Array.isArray(values) || values.length === 0 || period <= 0) return null;
+            const out = [];
+            const k = 2 / (period + 1);
+            // start with SMA for first period if available
+            let sma = null;
+            if (values.length >= period) {
+                const slice = values.slice(0, period).map(v => Number(v)).filter(v => !isNaN(v));
+                if (slice.length === period) sma = slice.reduce((a,b)=>a+b,0)/period;
+            }
+            let prev = sma !== null ? sma : Number(values[0]) || 0;
+            for (let i=0;i<values.length;i++) {
+                const v = Number(values[i]);
+                if (isNaN(v)) { out.push(null); continue; }
+                if (i < period-1 && sma === null) {
+                    // not enough data yet
+                    out.push(null);
+                    prev = v;
+                    continue;
+                }
+                if (i === period-1 && sma !== null) {
+                    prev = sma;
+                }
+                const ema = (v - prev) * k + prev;
+                out.push(ema);
+                prev = ema;
+            }
+            return out;
+        }
+
+        // Update EMA cells for a single symbol by fetching OHLC resampled to timeframe and computing ema9/ema15
+        async function updateEmaForSymbol(symbol, timeframe) {
+            try {
+                if (!colIndexMap || !colIndexMap['ema_9'] || !colIndexMap['ema_15']) return false;
+                const res = await fetch(`/api/chart-data/ohlc/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}`, { cache: 'no-store' }).catch(() => null);
+                if (!res || !res.ok) return false;
+                const payload = await res.json().catch(() => null);
+                if (!payload || !payload.chartData || !Array.isArray(payload.chartData.datasets)) return false;
+                // Extract Close dataset
+                let closeDs = payload.chartData.datasets.find(d => d.label && /close/i.test(d.label));
+                if (!closeDs) closeDs = payload.chartData.datasets.find(d => d.label && !/ohlc/i.test(d.label) && Array.isArray(d.data));
+                let closes = [];
+                if (closeDs && Array.isArray(closeDs.data)) {
+                    closes = closeDs.data.map(pt => {
+                        if (Array.isArray(pt)) return Number(pt[3] || pt[0] || null);
+                        if (typeof pt === 'object') return Number(pt.c ?? pt.close ?? null);
+                        return Number(pt);
+                    }).filter(v => !isNaN(v));
+                }
+                if (!closes || closes.length === 0) return false;
+                const ema9Arr = computeEMAArray(closes, 9);
+                const ema15Arr = computeEMAArray(closes, 15);
+                const ema9 = ema9Arr ? ema9Arr[ema9Arr.length-1] : null;
+                const ema15 = ema15Arr ? ema15Arr[ema15Arr.length-1] : null;
+
+                const row = document.getElementById(`row-${symbol}`);
+                if (!row) return false;
+                const cells = row.querySelectorAll('td');
+                const idx9 = colIndexMap['ema_9'];
+                const idx15 = colIndexMap['ema_15'];
+                // compute cmp for pct display if needed
+                const cmpCell = cells[1];
+                let cmp = NaN;
+                if (cmpCell) {
+                    const attr = cmpCell.getAttribute && cmpCell.getAttribute('data-cmp');
+                    cmp = (attr !== null && attr !== undefined) ? parseFloat(attr) : NaN;
+                }
+
+                const formatVal = (v) => (v === null || v === undefined || isNaN(v)) ? '<span class="cell-muted">-</span>' : Number(v).toFixed(2);
+                const formatPct = (v) => {
+                    if (v === null || v === undefined || isNaN(v) || isNaN(cmp) || cmp === 0) return '<span class="cell-muted">-</span>';
+                    const d = ((v - cmp)/cmp)*100; const cls = (cmp > v) ? 'percent-pos' : (cmp < v ? 'percent-neg' : 'percent-neutral');
+                    return `<span class="${cls}" data-pct="${d}">${d.toFixed(2)}%</span>`;
+                };
+
+                // Decide color based on ema9 vs ema15
+                let cls9 = 'percent-neutral', cls15 = 'percent-neutral';
+                if (!isNaN(ema9) && !isNaN(ema15)) {
+                    if (ema9 > ema15) { cls9 = cls15 = 'percent-pos'; }
+                    else if (ema9 < ema15) { cls9 = cls15 = 'percent-neg'; }
+                    else { cls9 = cls15 = 'percent-neutral'; }
+                }
+
+                // Update DOM cells if indices present
+                if (idx9 !== undefined && cells[idx9]) {
+                    cells[idx9].innerHTML = showPctDiff ? formatPct(ema9) : `<span class="${cls9}">${formatVal(ema9)}</span>`;
+                }
+                if (idx15 !== undefined && cells[idx15]) {
+                    cells[idx15].innerHTML = showPctDiff ? formatPct(ema15) : `<span class="${cls15}">${formatVal(ema15)}</span>`;
+                }
+
+                return true;
+            } catch (e) { console.warn('updateEmaForSymbol failed', symbol, e); return false; }
+        }
+
+        // Concurrency helper to run promises with limited parallelism
+        async function runWithConcurrency(items, workerFn, limit = 6) {
+            const results = [];
+            const executing = new Set();
+            for (const it of items) {
+                const p = Promise.resolve().then(() => workerFn(it));
+                results.push(p);
+                executing.add(p);
+                p.then(() => executing.delete(p)).catch(() => executing.delete(p));
+                if (executing.size >= limit) await Promise.race(executing);
+            }
+            return Promise.all(results);
+        }
+
+        async function updateAllEmaForTimeframe() {
+            try {
+                const tf = document.getElementById('timeframeSelect')?.value || '15mins';
+                const list = symbols.map(s => s.Symbol || s);
+                if (!list || list.length === 0) return;
+                // Show small progress toast
+                showModalProgress(`Updating EMA(9/15) for timeframe ${tf}...`);
+                await runWithConcurrency(list, async (sym) => { await updateEmaForSymbol(sym, tf); }, 6);
+                clearModalProgress();
+                toastr.success('EMA(9/15) updated to selected timeframe', 'EMA Updated');
+                try { updateAllRecoLabels(); } catch(e) { /* ignore */ }
+            } catch (e) {
+                try { clearModalProgress(); } catch(e){}
+                console.warn('updateAllEmaForTimeframe failed', e);
+            }
+        }
+
+        // Recompute Reco labels for all visible rows (use computeRecoScore)
+        function updateAllRecoLabels() {
+            try {
+                const tbody = document.getElementById('symbolsTBody');
+                if (!tbody) return;
+                tbody.querySelectorAll('tr').forEach(tr => {
+                    try {
+                        const sym = tr.id && tr.id.replace && tr.id.replace('row-','');
+                        if (!sym) return;
+                        const cell = tr.querySelector('.reco-cell');
+                        if (!cell) return;
+                        // computeRecoScore will attempt DOM fallback when a string is passed
+                        const score = computeRecoScore(sym);
+                        cell.innerHTML = scoreToLabelHtml(score);
+                        try { cell.title = buildRecoTooltip(sym, score); } catch(e) { /* ignore */ }
+                    } catch(e) { /* ignore per-row errors */ }
+                });
+            } catch (e) { console.warn('updateAllRecoLabels failed', e); }
+        }
+
+        // Helper: parse numeric from a cell's content or data-original/data-pct attributes
+        function parseNumericFromCell(cell, cmpForPctFallback) {
+            try {
+                if (!cell) return NaN;
+                // Prefer data-original if we've stored it before
+                const orig = cell.getAttribute && cell.getAttribute('data-original');
+                if (orig !== null && orig !== undefined && orig !== '') {
+                    const n = parseFloat(orig);
+                    if (!isNaN(n)) return n;
+                }
+                // If there's an element with data-pct, reconstruct if cmp available
+                const pctEl = cell.querySelector && cell.querySelector('[data-pct]');
+                if (pctEl) {
+                    const pct = parseFloat(pctEl.getAttribute('data-pct'));
+                    if (!isNaN(pct) && cmpForPctFallback && !isNaN(cmpForPctFallback) && cmpForPctFallback !== 0) {
+                        return cmpForPctFallback * (1 + pct / 100);
+                    }
+                }
+                // Otherwise try to parse visible text (strip % and non-numeric)
+                let txt = cell.innerText || '';
+                txt = txt.replace('%','').replace(/[^0-9.\-]/g,'');
+                const v = parseFloat(txt);
+                return isNaN(v) ? NaN : v;
+            } catch (e) { return NaN; }
+        }
+
+        // Helper: convert selected timeframe string to minutes (used for timeframe-aware indicators)
+        function getTimeframeMinutes() {
+            try {
+                const tf = document.getElementById('timeframeSelect')?.value || '15mins';
+                if (/^(\d+)min?s?$/.test(tf)) return parseInt(tf.match(/^(\d+)/)[1], 10);
+                if (/^1hour$/.test(tf) || /^1h$/.test(tf)) return 60;
+                if (/^daily$/.test(tf) || /^1d$/.test(tf)) return 1440;
+                // fallback: parse leading number
+                const m = tf.match(/(\d+)/);
+                return m ? parseInt(m[1], 10) : 15;
+            } catch (e) { return 15; }
+        }
+
+        // Update only EMA/DMA cells in-place to toggle between numeric and percent view.
+        function updateEmaDmaPctDisplay() {
+            try {
+                const tbody = document.getElementById('symbolsTBody');
+                if (!tbody) return;
+                const emaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('ema_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+                const dmaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+
+                // For each row, update EMA/DMA cells only
+                tbody.querySelectorAll('tr').forEach(tr => {
+                    try {
+                        const cells = tr.querySelectorAll('td');
+                        if (!cells || cells.length === 0) return;
+                        const cmpAttr = cells[1] && cells[1].getAttribute ? cells[1].getAttribute('data-cmp') : null;
+                        const cmp = (cmpAttr !== null && cmpAttr !== undefined) ? parseFloat(cmpAttr) : parseFloat((cells[1] && (cells[1].innerText||'').replace(/[^0-9.\-]/g,'')) || NaN);
+
+                        // First handle EMA 9 and 15 together for shared coloring
+                        const idx9 = colIndexMap['ema_9'];
+                        const idx15 = colIndexMap['ema_15'];
+                        let ema9Val = NaN, ema15Val = NaN;
+                        if (idx9 !== undefined && cells[idx9]) ema9Val = parseNumericFromCell(cells[idx9], cmp);
+                        if (idx15 !== undefined && cells[idx15]) ema15Val = parseNumericFromCell(cells[idx15], cmp);
+
+                        // Determine shared class
+                        let sharedCls = 'percent-neutral';
+                        if (!isNaN(ema9Val) && !isNaN(ema15Val)) {
+                            if (ema9Val > ema15Val) sharedCls = 'percent-pos';
+                            else if (ema9Val < ema15Val) sharedCls = 'percent-neg';
+                        }
+
+                        // Helper to set cell content (numeric or pct) and preserve original numeric in data-original
+                        const setCellToPct = (cell, numericVal) => {
+                            if (!cell) return;
+                            if (isNaN(numericVal) || isNaN(cmp) || cmp === 0) {
+                                cell.innerHTML = '<span class="cell-muted">-</span>';
+                                return;
+                            }
+                            // store original numeric for restoration
+                            cell.setAttribute('data-original', String(numericVal));
+                            const d = ((numericVal - cmp)/cmp) * 100;
+                            // choose class: for EMA-9/15 caller will set sharedCls by wrapping span later
+                            const cls = (cell === cells[idx9] || cell === cells[idx15]) ? sharedCls : (cmp > numericVal ? 'percent-pos' : (cmp < numericVal ? 'percent-neg' : 'percent-neutral'));
+                            cell.innerHTML = `<span class="${cls}" data-pct="${d}">${d.toFixed(2)}%</span>`;
+                        };
+
+                        const setCellToNumeric = (cell) => {
+                            if (!cell) return;
+                            // prefer stored original
+                            const orig = cell.getAttribute && cell.getAttribute('data-original');
+                            let numericVal = NaN;
+                            if (orig !== null && orig !== undefined && orig !== '') numericVal = parseFloat(orig);
+                            // if no stored original, try reconstructing from pct
+                            if (isNaN(numericVal)) {
+                                const pctEl = cell.querySelector && cell.querySelector('[data-pct]');
+                                if (pctEl && !isNaN(cmp) && cmp !== 0) {
+                                    const pct = parseFloat(pctEl.getAttribute('data-pct'));
+                                    if (!isNaN(pct)) numericVal = cmp * (1 + pct/100);
+                                }
+                            }
+                            if (isNaN(numericVal)) {
+                                // fallback: attempt parse of visible text
+                                const txt = (cell.innerText||'').replace('%','').replace(/[^0-9.\-]/g,'');
+                                numericVal = parseFloat(txt);
+                            }
+                            if (isNaN(numericVal)) { cell.innerHTML = '<span class="cell-muted">-</span>'; return; }
+                            // decide class: for EMA-9/15 use sharedCls, otherwise cmp-relative
+                            const cls = (cell === cells[idx9] || cell === cells[idx15]) ? sharedCls : (isNaN(cmp) ? 'percent-neutral' : (cmp > numericVal ? 'percent-pos' : (cmp < numericVal ? 'percent-neg' : 'percent-neutral')));
+                            cell.setAttribute('data-original', String(numericVal));
+                            cell.innerHTML = `<span class="${cls}">${numericVal.toFixed(2)}</span>`;
+                        };
+
+                        // Toggle conversion
+                        if (showPctDiff) {
+                            // convert EMA cells
+                            emaKeys.forEach(k => {
+                                const idx = colIndexMap[k];
+                                const cell = cells[idx];
+                                if (!cell) return;
+                                // for ema_9/15 we already have computed numeric values; else parse
+                                let num = NaN;
+                                if (k === 'ema_9') num = ema9Val;
+                                else if (k === 'ema_15') num = ema15Val;
+                                if (isNaN(num)) num = parseNumericFromCell(cell, cmp);
+                                setCellToPct(cell, num);
+                            });
+                            // convert DMA cells
+                            dmaKeys.forEach(k => {
+                                const idx = colIndexMap[k];
+                                const cell = cells[idx];
+                                if (!cell) return;
+                                const num = parseNumericFromCell(cell, cmp);
+                                setCellToPct(cell, num);
+                            });
+                        } else {
+                            // restore numeric view
+                            emaKeys.forEach(k => {
+                                const idx = colIndexMap[k];
+                                const cell = cells[idx];
+                                if (!cell) return;
+                                setCellToNumeric(cell);
+                            });
+                            dmaKeys.forEach(k => {
+                                const idx = colIndexMap[k];
+                                const cell = cells[idx];
+                                if (!cell) return;
+                                setCellToNumeric(cell);
+                            });
+                        }
+                    } catch (e) { /* ignore row-level errors */ }
+                });
+            } catch (e) { console.warn('updateEmaDmaPctDisplay failed', e); }
+        }
+
         // Compute numeric recommendation score for a symbol (used for sorting)
+        // This function is timeframe-aware: it will read RSI for the selected timeframe
+        // (e.g. rsi_15 when timeframe=15mins). EMA crossover is assumed to be updated
+        // into the ema_9/ema_15 cells for the current timeframe by updateAllEmaForTimeframe().
         function computeRecoScore(symbolData) {
             const safeNum = (v) => {
                 if (v === null || v === undefined) return null;
@@ -785,7 +1105,10 @@
             };
 
             // symbolData can be either the API object or the symbol name string
-            let cmp = null, ema9 = null, ema15 = null, ema65 = null, ema200 = null, rsi15 = null;
+            // determine timeframe-specific RSI key
+            const tfMin = getTimeframeMinutes();
+            const rsiKey = `rsi_${tfMin}`;
+            let cmp = null, ema9 = null, ema15 = null, ema65 = null, ema200 = null, rsi_tf = null;
             if (typeof symbolData === 'string') {
                 // symbol name provided; attempt DOM fallback
                 const sym = symbolData;
@@ -806,26 +1129,28 @@
                         if (pctEl) {
                             const pct = parseFloat(pctEl.getAttribute('data-pct'));
                             if (!isNaN(pct) && cmp) {
-                                // reconstruct indicator value from percent: pct = (indicator - cmp)/cmp *100 => indicator = cmp*(1 + pct/100)
                                 return cmp * (1 + (pct / 100));
                             }
                         }
                         return safeNum(c.innerText);
                     };
-                    rsi15 = readIndicator(3);
-                    ema9 = readIndicator(6);
-                    ema15 = readIndicator(7);
-                    ema65 = readIndicator(8);
-                    ema200 = readIndicator(9);
+                    // dynamic rsi index fallback: prefer column map if available
+                    const rsiIdx = (colIndexMap && colIndexMap[rsiKey] !== undefined) ? colIndexMap[rsiKey] : 3;
+                    rsi_tf = readIndicator(rsiIdx);
+                    ema9 = readIndicator(colIndexMap['ema_9'] !== undefined ? colIndexMap['ema_9'] : 6);
+                    ema15 = readIndicator(colIndexMap['ema_15'] !== undefined ? colIndexMap['ema_15'] : 7);
+                    ema65 = readIndicator(colIndexMap['ema_65'] !== undefined ? colIndexMap['ema_65'] : 8);
+                    ema200 = readIndicator(colIndexMap['ema_200'] !== undefined ? colIndexMap['ema_200'] : 9);
                 }
             } else {
                 // object from API
                 cmp = safeNum(symbolData.CMP || symbolData.cmp || symbolData['CMP']);
                 ema9 = safeNum(symbolData.ema_9);
                 ema15 = safeNum(symbolData.ema_15);
-                ema65 = safeNum(symbolData.ema_65);
-                ema200 = safeNum(symbolData.ema_200);
-                rsi15 = safeNum(symbolData.rsi_15);
+                ema65 = safeNum(symbolData.ema_65) || safeNum(symbolData.ema_21) || null;
+                ema200 = safeNum(symbolData.ema_200) || safeNum(symbolData.dma_200) || null;
+                // timeframe-specific RSI key lookup
+                rsi_tf = safeNum(symbolData[rsiKey]);
 
                 // If missing numeric fields, try DOM fallback using symbol field
                 if ((ema9 === null || ema15 === null || ema65 === null) && (symbolData.Symbol || symbolData.symbol)) {
@@ -847,30 +1172,113 @@
                             }
                             return safeNum(c.innerText);
                         };
-                        rsi15 = rsi15 || readIndicator(3);
-                        ema9 = ema9 || readIndicator(6);
-                        ema15 = ema15 || readIndicator(7);
-                        ema65 = ema65 || readIndicator(8);
-                        ema200 = ema200 || readIndicator(9);
+                        const rsiIdx = (colIndexMap && colIndexMap[rsiKey] !== undefined) ? colIndexMap[rsiKey] : 3;
+                        rsi_tf = rsi_tf || readIndicator(rsiIdx);
+                        ema9 = ema9 || readIndicator(colIndexMap['ema_9'] !== undefined ? colIndexMap['ema_9'] : 6);
+                        ema15 = ema15 || readIndicator(colIndexMap['ema_15'] !== undefined ? colIndexMap['ema_15'] : 7);
+                        ema65 = ema65 || readIndicator(colIndexMap['ema_65'] !== undefined ? colIndexMap['ema_65'] : 8);
+                        ema200 = ema200 || readIndicator(colIndexMap['ema_200'] !== undefined ? colIndexMap['ema_200'] : 9);
                     }
                 }
             }
 
             let score = 0;
-            if (ema9 !== null && ema15 !== null && ema65 !== null) {
-                if (ema9 > ema15 && ema15 > ema65) score += 2;
-                if (ema9 < ema15 && ema15 < ema65) score -= 2;
+            // EMA crossover on selected timeframe (ema_9 vs ema_15)
+            if (ema9 !== null && ema15 !== null) {
+                if (ema9 > ema15) score += 2;
+                if (ema9 < ema15) score -= 2;
+                // confirmation vs a longer EMA if available
+                if (ema65 !== null) {
+                    if (ema9 > ema15 && ema15 > ema65) score += 0.5;
+                    if (ema9 < ema15 && ema15 < ema65) score -= 0.5;
+                }
             }
+            // DMA / long-term bias (timeframe-agnostic)
             if (cmp !== null && ema200 !== null) {
                 if (cmp > ema200) score += 1.5; else if (cmp < ema200) score -= 1.5;
             }
-            if (rsi15 !== null) {
-                if (rsi15 >= 70) score += 1;
-                else if (rsi15 <= 30) score -= 1;
-                else if (rsi15 >= 55) score += 0.5;
-                else if (rsi15 <= 45) score -= 0.5;
+            // RSI contribution for the selected timeframe
+            if (rsi_tf !== null) {
+                if (rsi_tf >= 70) score += 1;
+                else if (rsi_tf <= 30) score -= 1;
+                else if (rsi_tf >= 55) score += 0.5;
+                else if (rsi_tf <= 45) score -= 0.5;
             }
             return score;
+        }
+
+        // Map numeric score to labelled HTML used in table cells
+        function scoreToLabelHtml(score) {
+            if (score === null || score === undefined || isNaN(score)) return '<span class="reco-neutral">Neutral</span>';
+            if (score >= 2.5) return '<span class="reco-bull">Strong Bull</span>';
+            if (score >= 1.0) return '<span class="reco-bull">Bullish</span>';
+            if (score <= -2.5) return '<span class="reco-bear">Strong Bear</span>';
+            if (score <= -1.0) return '<span class="reco-bear">Bearish</span>';
+            return '<span class="reco-neutral">Neutral</span>';
+        }
+
+        // Build a small tooltip string describing the breakdown of the reco for hover
+        function buildRecoTooltip(symbolData, score) {
+            try {
+                const tfMin = getTimeframeMinutes();
+                const rsiKey = `rsi_${tfMin}`;
+                // attempt to extract contributing values (best-effort)
+                let cmp = null, ema9 = null, ema15 = null, ema65 = null, ema200 = null, rsi_tf = null;
+                try {
+                    const s = (typeof symbolData === 'string') ? document.getElementById(`row-${symbolData}`) : null;
+                    if (s && s.querySelector) {
+                        const cells = s.querySelectorAll('td');
+                        const read = (idx) => parseNumericFromCell(cells[idx], parseFloat(cells[1]?.getAttribute('data-cmp')||NaN));
+                        cmp = read(colIndexMap['CMP'] || 1);
+                        rsi_tf = read(colIndexMap[rsiKey] !== undefined ? colIndexMap[rsiKey] : 3);
+                        ema9 = read(colIndexMap['ema_9'] !== undefined ? colIndexMap['ema_9'] : 6);
+                        ema15 = read(colIndexMap['ema_15'] !== undefined ? colIndexMap['ema_15'] : 7);
+                        ema65 = read(colIndexMap['ema_65'] !== undefined ? colIndexMap['ema_65'] : 8);
+                        ema200 = read(colIndexMap['ema_200'] !== undefined ? colIndexMap['ema_200'] : 9);
+                    } else if (symbolData && typeof symbolData === 'object') {
+                        cmp = parseFloat(symbolData.CMP || symbolData.cmp || symbolData['CMP']);
+                        ema9 = parseFloat(symbolData.ema_9);
+                        ema15 = parseFloat(symbolData.ema_15);
+                        ema65 = parseFloat(symbolData.ema_65) || parseFloat(symbolData.ema_21);
+                        ema200 = parseFloat(symbolData.ema_200) || parseFloat(symbolData.dma_200);
+                        rsi_tf = parseFloat(symbolData[rsiKey]);
+                    }
+                } catch (e) { /* ignore */ }
+
+                const parts = [];
+                if (!isNaN(ema9) && !isNaN(ema15)) parts.push(`EMA9 ${ema9.toFixed(2)} vs EMA15 ${ema15.toFixed(2)} (${ema9>ema15?'+2':'-2'})`);
+                if (!isNaN(ema65) && !isNaN(ema9) && !isNaN(ema15)) {
+                    const conf = (ema9>ema15 && ema15>ema65) ? '+0.5' : (ema9<ema15 && ema15<ema65 ? '-0.5' : '0');
+                    const confLabel = (conf === '0') ? 'none' : conf;
+                    parts.push(`EMA65 ${ema65.toFixed(2)} conf ${confLabel}`);
+                }
+                // Include DMA (short/med-term) values in the breakdown if available
+                try {
+                    const dmaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+                    if (dmaKeys.length > 0) {
+                        const dmaParts = [];
+                        for (const dk of dmaKeys) {
+                            let v = NaN;
+                            if (s && s.querySelector) {
+                                const cells = s.querySelectorAll('td');
+                                const idx = colIndexMap[dk];
+                                if (idx !== undefined && cells[idx]) {
+                                    v = parseNumericFromCell(cells[idx], parseFloat(cells[1]?.getAttribute('data-cmp')||NaN));
+                                }
+                            } else if (symbolData && typeof symbolData === 'object') {
+                                v = parseFloat(symbolData[dk]);
+                            }
+                            if (!isNaN(v)) dmaParts.push(`${dk.toUpperCase().replace('_','')} ${v.toFixed(2)}`);
+                        }
+                        if (dmaParts.length) parts.push(dmaParts.join(' | '));
+                    }
+                } catch(e) { /* ignore dma extraction failures */ }
+
+                if (!isNaN(cmp) && !isNaN(ema200)) parts.push(`CMP ${cmp.toFixed(2)} vs EMA200 ${ema200.toFixed(2)} (${cmp>ema200?'+1.5':'-1.5'})`);
+                if (!isNaN(rsi_tf)) parts.push(`RSI(${tfMin}) ${rsi_tf.toFixed(1)}`);
+                const summary = parts.length ? parts.join(' \n') : 'Insufficient data to compute breakdown';
+                return `Score: ${isNaN(score) ? 'N/A' : score.toFixed(2)}\n${summary}`;
+            } catch (e) { return 'Reco breakdown unavailable'; }
         }
 
         function createTableRow(symbolData) {
@@ -912,40 +1320,11 @@
                 return `<span class="${cls}" data-pct="${d}">${d.toFixed(2)}%</span>`;
             };
             const reco = () => {
-                // Weighted scoring to mimic legacy recommendation
-                // Sources: EMA alignment (9>15>21), CMP vs DMA200, RSI(15)
-                const safeNum = (v) => { const n = Number(v); return isNaN(n)?null:n; };
-                const cmp = safeNum(getCellVal('CMP'));
-                const ema9 = safeNum(getCellVal('ema_9'));
-                const ema15 = safeNum(getCellVal('ema_15'));
-                const ema21 = safeNum(getCellVal('ema_21'));
-                const dma200 = safeNum(getCellVal('dma_200'));
-                const rsi15 = safeNum(getCellVal('rsi_15'));
-
-                let score = 0;
-                // EMA alignment weight
-                if (ema9 !== null && ema15 !== null && ema21 !== null) {
-                    if (ema9 > ema15 && ema15 > ema21) score += 2; // bullish alignment
-                    if (ema9 < ema15 && ema15 < ema21) score -= 2; // bearish alignment
-                }
-                // CMP vs DMA200
-                if (cmp !== null && dma200 !== null) {
-                    if (cmp > dma200) score += 1.5; else if (cmp < dma200) score -= 1.5;
-                }
-                // RSI contribution
-                if (rsi15 !== null) {
-                    if (rsi15 >= 70) score += 1; // strong momentum
-                    else if (rsi15 <= 30) score -= 1; // strong sell pressure
-                    else if (rsi15 >= 55) score += 0.5;
-                    else if (rsi15 <= 45) score -= 0.5;
-                }
-
-                // Final mapping
-                if (score >= 2.5) return '<span class="reco-bull">Strong Bull</span>';
-                if (score >= 1.0) return '<span class="reco-bull">Bullish</span>';
-                if (score <= -2.5) return '<span class="reco-bear">Strong Bear</span>';
-                if (score <= -1.0) return '<span class="reco-bear">Bearish</span>';
-                return '<span class="reco-neutral">Neutral</span>';
+                try {
+                    // Use the unified, timeframe-aware scorer
+                    const sc = computeRecoScore(symbolData);
+                    return scoreToLabelHtml(sc);
+                } catch (e) { return '<span class="reco-neutral">Neutral</span>'; }
             };
 
             // Symbol cell: chart icon directly left of symbol name
@@ -957,7 +1336,10 @@
             cmpCell.innerHTML = rawCmp ? rawCmp : '<span class="cell-muted">-</span>';
             if (!isNaN(cmpNum)) cmpCell.setAttribute('data-cmp', String(cmpNum));
             tr.appendChild(cmpCell);
-            tr.appendChild(td(reco(), 'reco-cell'));
+            // create reco cell so we can attach a tooltip explaining the breakdown
+            const recoTd = td(reco(), 'reco-cell');
+            try { const lblScore = computeRecoScore(s); recoTd.title = buildRecoTooltip(s, lblScore); } catch(e) { /* ignore */ }
+            tr.appendChild(recoTd);
             // Mini 'Trend' candles canvas cell (placed here so it lines up with the 'Trend' header)
             const miniTd = document.createElement('td');
             miniTd.style.width = '80px';
@@ -971,7 +1353,40 @@
             const cmpVal = !isNaN(cmpNum) ? cmpNum : NaN;
             // Render EMA columns dynamically
             const emaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('ema_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
-            emaKeys.forEach(k => tr.appendChild(td(showPctDiff ? pct(getCellVal(k), cmpVal) : colorCompareHtml(getCellVal(k), cmpVal))));
+            // Special rendering: EMA-9 and EMA-15 should share color based on their relation.
+            const parseNumForCell = (v) => { if (v === null || v === undefined || v === '') return NaN; const s = String(v).replace(/[^0-9.\-]/g,''); const n = parseFloat(s); return isNaN(n) ? NaN : n; };
+            const ema9Raw = getCellVal('ema_9'); const ema15Raw = getCellVal('ema_15');
+            const ema9Num = parseNumForCell(ema9Raw); const ema15Num = parseNumForCell(ema15Raw);
+            emaKeys.forEach(k => {
+                try {
+                    const val = getCellVal(k);
+                    if (k === 'ema_9' || k === 'ema_15') {
+                        // Determine color from ema9 vs ema15
+                        let cls = 'percent-neutral';
+                        if (!isNaN(ema9Num) && !isNaN(ema15Num)) {
+                            if (ema9Num > ema15Num) cls = 'percent-pos';
+                            else if (ema9Num < ema15Num) cls = 'percent-neg';
+                            else cls = 'percent-neutral';
+                        }
+                        // Content: show percent if toggle on, else numeric
+                        let content = '';
+                        if (showPctDiff) {
+                            if (val === null || val === undefined || val === '' || isNaN(parseNumForCell(val)) || isNaN(cmpVal) || cmpVal === 0) {
+                                content = '<span class="cell-muted">-</span>';
+                            } else {
+                                const n = parseNumForCell(val);
+                                const d = ((n - cmpVal) / cmpVal) * 100;
+                                content = `${d.toFixed(2)}%`;
+                            }
+                        } else {
+                            content = (val === null || val === undefined || val === '') ? '<span class="cell-muted">-</span>' : Number(parseNumForCell(val)).toFixed(2);
+                        }
+                        tr.appendChild(td(`<span class="${cls}">${content}</span>`));
+                    } else {
+                        tr.appendChild(td(showPctDiff ? pct(getCellVal(k), cmpVal) : colorCompareHtml(getCellVal(k), cmpVal)));
+                    }
+                } catch (e) { tr.appendChild(td('<span class="cell-muted">-</span>')); }
+            });
             // Render DMA columns dynamically
             const dmaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
             dmaKeys.forEach(k => tr.appendChild(td(showPctDiff ? pct(getCellVal(k), cmpVal) : colorCompareHtml(getCellVal(k), cmpVal))));
@@ -1421,16 +1836,18 @@
                             const cmpVal = (cmpAttr !== null && cmpAttr !== undefined) ? parseFloat(cmpAttr) : parseFloat(cells[1]?.innerText?.replace(/[^0-9.\-]/g,'') || 'NaN');
                             if (!isNaN(cmpVal) && cmpVal !== 0) {
                                 const n = parseFloat(d[dataKey]);
-                                if (!isNaN(n)) {
-                                    const delta = ((n - cmpVal)/cmpVal)*100;
-                                    // CMP > indicator -> bullish (green). CMP < indicator -> bearish (red). Equal -> neutral
-                                    let pctClass = 'percent-neutral';
-                                    if (cmpVal > n) pctClass = 'percent-pos';
-                                    else if (cmpVal < n) pctClass = 'percent-neg';
-                                    cells[colIndex[key]].innerHTML = `<span class="${pctClass}" data-pct="${delta}">${delta.toFixed(2)}%</span>`;
-                                } else {
-                                    cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
-                                }
+                                    if (!isNaN(n)) {
+                                        const delta = ((n - cmpVal)/cmpVal)*100;
+                                        // CMP > indicator -> bullish (green). CMP < indicator -> bearish (red). Equal -> neutral
+                                        let pctClass = 'percent-neutral';
+                                        if (cmpVal > n) pctClass = 'percent-pos';
+                                        else if (cmpVal < n) pctClass = 'percent-neg';
+                                        // store absolute value for later parsing by tooltips
+                                        cells[colIndex[key]].setAttribute('data-original', String(n));
+                                        cells[colIndex[key]].innerHTML = `<span class="${pctClass}" data-pct="${delta}">${delta.toFixed(2)}%</span>`;
+                                    } else {
+                                        cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
+                                    }
                             } else {
                                 cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
                             }
@@ -1452,6 +1869,8 @@
                                         let cls = 'percent-neutral';
                                         if (cmpValLocal > n) cls = 'percent-pos';
                                         else if (cmpValLocal < n) cls = 'percent-neg';
+                                        // store absolute numeric value
+                                        cells[colIndex[key]].setAttribute('data-original', String(n));
                                         cells[colIndex[key]].innerHTML = `<span class="${cls}">${n.toFixed(2)}</span>`;
                                     } else {
                                         cells[colIndex[key]].innerHTML = fmt(d[dataKey]);
@@ -1481,22 +1900,15 @@
                 const rsi15 = readVal('rsi_15', colIndex['rsi_15']);
                 let recoCell = row.querySelector('.reco-cell');
                 if (recoCell) {
-                    // Compute weighted score (same as initial render)
-                    const safeNum = (v) => { const n = Number(v); return isNaN(n)?null:n; };
-                    const cmp_v = safeNum(cmpVal);
-                    const e9 = safeNum(ema9), e15 = safeNum(ema15), e21 = safeNum(ema21), d200 = safeNum(dma200), r15 = safeNum(rsi15);
-                    let score = 0;
-                    if (e9 !== null && e15 !== null && e21 !== null) {
-                        if (e9 > e15 && e15 > e21) score += 2;
-                        if (e9 < e15 && e15 < e21) score -= 2;
-                    }
-                    if (cmp_v !== null && d200 !== null) { if (cmp_v > d200) score += 1.5; else if (cmp_v < d200) score -= 1.5; }
-                    if (r15 !== null) { if (r15 >= 70) score += 1; else if (r15 <= 30) score -= 1; else if (r15 >= 55) score += 0.5; else if (r15 <= 45) score -= 0.5; }
-                    if (score >= 2.5) recoCell.innerHTML = '<span class="reco-bull">Strong Bull</span>';
-                    else if (score >= 1.0) recoCell.innerHTML = '<span class="reco-bull">Bullish</span>';
-                    else if (score <= -2.5) recoCell.innerHTML = '<span class="reco-bear">Strong Bear</span>';
-                    else if (score <= -1.0) recoCell.innerHTML = '<span class="reco-bear">Bearish</span>';
-                    else recoCell.innerHTML = '<span class="reco-neutral">Neutral</span>';
+                    try {
+                        const sc = computeRecoScore(d || symbolData);
+                        recoCell.innerHTML = scoreToLabelHtml(sc);
+                        // Use the DOM-row (symbol) when building the tooltip so we read
+                        // the freshly-updated cell values (percent/numeric) instead of
+                        // relying solely on the API object which may not include
+                        // timeframe-specific or freshly-calculated fields.
+                        try { recoCell.title = buildRecoTooltip(symbol, sc); } catch(e) { /* ignore */ }
+                    } catch (e) { recoCell.innerHTML = '<span class="reco-neutral">Neutral</span>'; }
                 }
             } catch(e) { /* ignore */ }
         }
