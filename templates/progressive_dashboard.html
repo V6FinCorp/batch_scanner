@@ -167,6 +167,8 @@
     .action-popup { position:absolute; z-index:2000; background:var(--bg-primary); border:1px solid var(--border-color); padding:6px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.12); display:flex; gap:6px; }
     .action-popup .popup-btn { padding:4px 8px; border-radius:4px; cursor:pointer; border:1px solid var(--border-color); background:var(--bg-accent); font-size:0.82rem; }
     .popup-icon { margin-left:6px; cursor:pointer; color:var(--text-secondary); }
+    .action-popup .last-update { display:block; font-size:0.75rem; color:var(--text-muted); margin-top:6px; }
+    .action-popup .last-update span { display:block; }
     </style>
 </head>
 <body>
@@ -328,6 +330,8 @@
     let showPctDiff = JSON.parse(localStorage.getItem('showPctDiff') || 'false');
     let isDarkMode = JSON.parse(localStorage.getItem('darkMode') || 'false');
     let chartInstance = null;
+    // Cache combined chart data per symbol+timeframe so modal controls can re-render locally
+    const chartCache = {};
     // Column index map for dynamic header columns
     let colIndexMap = {};
         // Modal progress toast handle (to update/clear persistent progress messages)
@@ -1109,6 +1113,49 @@
             } catch (e) { return NaN; }
         }
 
+        // Helper: attempt to extract a Date object from scanner payload/result
+        function extractTimestampFromResult(obj) {
+            try {
+                if (!obj || typeof obj !== 'object') return null;
+                // Common keys that may contain timestamp/date or epoch
+                const keys = ['last_ts','last_timestamp','last_update','timestamp','ts','time','updated_at','last'];
+                for (const k of keys) {
+                    if (obj[k] !== undefined && obj[k] !== null) {
+                        const v = obj[k];
+                        // if numeric and looks like epoch seconds or ms
+                        if (typeof v === 'number') {
+                            // assume seconds if value is < 1e12
+                            const ms = (v < 1e12) ? (v * 1000) : v;
+                            const d = new Date(ms);
+                            if (!isNaN(d.getTime())) return d;
+                        }
+                        if (typeof v === 'string') {
+                            // try ISO parse
+                            const d = new Date(v);
+                            if (!isNaN(d.getTime())) return d;
+                            // try numeric string
+                            const n = Number(v);
+                            if (!isNaN(n)) {
+                                const ms = (n < 1e12) ? (n * 1000) : n;
+                                const d2 = new Date(ms);
+                                if (!isNaN(d2.getTime())) return d2;
+                            }
+                        }
+                    }
+                }
+                // Recurse into nested objects `data` or `payload` etc.
+                if (obj.data && typeof obj.data === 'object') {
+                    const r = extractTimestampFromResult(obj.data);
+                    if (r) return r;
+                }
+                if (obj.payload && typeof obj.payload === 'object') {
+                    const r = extractTimestampFromResult(obj.payload);
+                    if (r) return r;
+                }
+            } catch(e) { /* ignore parse errors */ }
+            return null;
+        }
+
         // Helper: convert selected timeframe string to minutes (used for timeframe-aware indicators)
         function getTimeframeMinutes() {
             try {
@@ -1617,9 +1664,18 @@
                 <i class="fas fa-ellipsis-h popup-icon" title="More" onclick="toggleActionPopup(event, '${s}')"></i>
                 <div id="action-popup-${s}" class="action-popup" style="display:none;">
                     <div style="display:flex; gap:6px; margin-bottom:6px;">
-                        <span id="chip-${s}-rsi" class="action-chip status-idle" title="Run RSI" onclick="runScanner('${s}','rsi')">R</span>
-                        <span id="chip-${s}-ema" class="action-chip status-idle" title="Run EMA" onclick="runScanner('${s}','ema')">E</span>
-                        <span id="chip-${s}-dma" class="action-chip status-idle" title="Run DMA" onclick="runScanner('${s}','dma')">D</span>
+                        <div style="display:flex; flex-direction:column; align-items:center;">
+                            <span id="chip-${s}-rsi" class="action-chip status-idle" title="Run RSI" onclick="runScanner('${s}','rsi')">R</span>
+                            <span id="last-${s}-rsi" class="last-update"><span>-</span></span>
+                        </div>
+                        <div style="display:flex; flex-direction:column; align-items:center;">
+                            <span id="chip-${s}-ema" class="action-chip status-idle" title="Run EMA" onclick="runScanner('${s}','ema')">E</span>
+                            <span id="last-${s}-ema" class="last-update"><span>-</span></span>
+                        </div>
+                        <div style="display:flex; flex-direction:column; align-items:center;">
+                            <span id="chip-${s}-dma" class="action-chip status-idle" title="Run DMA" onclick="runScanner('${s}','dma')">D</span>
+                            <span id="last-${s}-dma" class="last-update"><span>-</span></span>
+                        </div>
                     </div>
                 </div>
             `;
@@ -1738,30 +1794,59 @@
                     }
                 }
 
-                // EMA/DMA percent range check (only when pct toggle enabled)
+                // EMA/DMA percent range check: compute percent using either data-pct
+                // (when rendered in pct mode) or by computing ((indicator - CMP)/CMP)*100
                 if (visible && (useEma || useDma) && document.getElementById('togglePct')?.checked) {
-                    // Collect percent values from EMA/DMA columns (they have data-pct if rendered as pct)
                     const cols = tr.querySelectorAll('td');
-                    const colIdxs = { ema:[6,7,8], dma:[9,10,11,12,13] };
+                    // Determine EMA/DMA column indices from colIndexMap
+                    const emaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('ema_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+                    const dmaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+                    const checkKeys = [];
+                    if (useEma) checkKeys.push(...emaKeys);
+                    if (useDma) checkKeys.push(...dmaKeys);
+
+                    // Get CMP for this row
+                    const cmpCell = cols[1];
+                    let cmp = NaN;
+                    try {
+                        const attr = cmpCell && cmpCell.getAttribute ? cmpCell.getAttribute('data-cmp') : null;
+                        cmp = (attr !== null && attr !== undefined) ? parseFloat(attr) : parseFloat((cmpCell && (cmpCell.innerText||'')).replace(/[^0-9.\-]/g,''));
+                    } catch(e) { cmp = NaN; }
+
                     let inRange = true;
-                    const checkCols = [];
-                    if (useEma) checkCols.push(...colIdxs.ema);
-                    if (useDma) checkCols.push(...colIdxs.dma);
-                    for (const idx of checkCols) {
+                    for (const key of checkKeys) {
+                        const idx = colIndexMap[key];
+                        if (idx === undefined) continue;
                         const cell = cols[idx];
                         if (!cell) continue;
-                        const pctEl = cell.querySelector('[data-pct]');
-                        let val = NaN;
-                        if (pctEl) {
-                            val = parseFloat(pctEl.getAttribute('data-pct'));
-                        } else {
-                            // attempt to parse text like "-1.23%"
-                            const txt = (cell.innerText || '').replace('%','').trim();
-                            const n = parseFloat(txt);
-                            if (!isNaN(n)) val = n;
-                        }
-                        if (!isNaN(min) && val < min) { inRange = false; break; }
-                        if (!isNaN(max) && val > max) { inRange = false; break; }
+
+                        // Prefer explicit data-pct attribute
+                        let pct = NaN;
+                        try {
+                            const pctEl = cell.querySelector && cell.querySelector('[data-pct]');
+                            if (pctEl) {
+                                pct = parseFloat(pctEl.getAttribute('data-pct'));
+                            } else {
+                                // Try data-original attribute (absolute indicator value)
+                                const orig = cell.getAttribute && cell.getAttribute('data-original');
+                                let indicator = NaN;
+                                if (orig !== null && orig !== undefined && orig !== '') {
+                                    indicator = parseFloat(orig);
+                                } else {
+                                    // Fallback: parse visible text (strip % and non-numeric)
+                                    const txt = (cell.innerText || '').replace('%','').replace(/[^0-9.\-]/g,'').trim();
+                                    if (txt !== '') indicator = parseFloat(txt);
+                                }
+                                if (!isNaN(indicator) && !isNaN(cmp) && cmp !== 0) {
+                                    pct = ((indicator - cmp) / cmp) * 100;
+                                }
+                            }
+                        } catch(e) { pct = NaN; }
+
+                        // If pct couldn't be determined, treat as out-of-range (hide)
+                        if (isNaN(pct)) { inRange = false; break; }
+                        if (!isNaN(min) && pct < min) { inRange = false; break; }
+                        if (!isNaN(max) && pct > max) { inRange = false; break; }
                     }
                     if (!inRange) visible = false;
                 }
@@ -1871,6 +1956,24 @@
                 }
             } catch(e) { /* ignore */ }
 
+            // Update per-scanner UI state for the popup timestamps, but do not
+            // set success timestamp here — prefer the server-provided last-record
+            // timestamp (written by refreshRow or runScanner) so it reflects actual
+            // data time rather than the local now().
+            try {
+                const tsSpan = document.getElementById(`last-${symbol}-${scanner}`);
+                if (tsSpan) {
+                    if (status === 'running') {
+                        tsSpan.innerHTML = `<span>running...</span>`;
+                    } else if (status === 'error') {
+                        tsSpan.innerHTML = `<span style="color:#ef4444">error</span>`;
+                    } else if (status === 'idle') {
+                        // leave previous timestamp if present; otherwise show '-'
+                        if (!tsSpan.innerText || tsSpan.innerText.trim() === '') tsSpan.innerHTML = `<span>-</span>`;
+                    }
+                }
+            } catch(e) { /* ignore */ }
+
             // After state change, attempt to refresh the Reco UI for this row so spinner/label updates
             try { updateRecoForRow(symbol); } catch(e) { /* ignore */ }
         }
@@ -1940,6 +2043,19 @@
                                 try { observeMiniCanvas(symbol); loadMiniSpark(symbol).catch(()=>{}); } catch(e) {}
                             }
                         }
+                        // If the run result contains a timestamp for the latest record, show it
+                        try {
+                            const ts = extractTimestampFromResult(result);
+                            if (ts) {
+                                const row = document.getElementById(`row-${symbol}`);
+                                if (row) {
+                                    ['rsi','ema','dma'].forEach(sc => {
+                                        const el = document.getElementById(`last-${symbol}-${sc}`);
+                                        if (el) el.innerHTML = `<span>${ts.toLocaleString()}</span>`;
+                                    });
+                                }
+                            }
+                        } catch(e) { /* ignore */ }
                         // Also check for RSI-60-like values in the run result and update that cell immediately
                         try {
                             const rsiCandidates = [];
@@ -2239,6 +2355,17 @@
                         setTimeout(() => { updateRecoForRow(symbol); }, 80);
                     } catch (e) { /* ignore */ }
                 }
+
+                        // If the payload contains a timestamp for the latest record, update the per-scanner last-update spans
+                        try {
+                            const ts = extractTimestampFromResult(d);
+                            if (ts) {
+                                ['rsi','ema','dma'].forEach(sc => {
+                                    const el = document.getElementById(`last-${symbol}-${sc}`);
+                                    if (el) el.innerHTML = `<span>${ts.toLocaleString()}</span>`;
+                                });
+                            }
+                        } catch(e) { /* ignore */ }
             } catch(e) { /* ignore */ }
         }
 
@@ -2409,26 +2536,44 @@
             }
             document.getElementById('chartSymbolName').textContent = symbol;
             modal.style.display = 'block';
-            const load = async () => {
+            const renderFromCacheOrNotify = (opts) => {
+                try {
+                    const tf = opts.timeframe || document.getElementById('modalTimeframeSelect')?.value || '15mins';
+                    const key = `${symbol}::${tf}`;
+                    const cd = chartCache[key];
+                    if (cd) {
+                        renderCombinedChart(cd, symbol, opts);
+                    } else {
+                        // Do not fetch automatically; inform user to click Reload to fetch server data
+                        try { toastr.info('No cached data for selected timeframe. Click Reload to fetch from server.', 'Chart'); } catch(e){}
+                    }
+                } catch (e) { console.warn('renderFromCacheOrNotify failed', e); }
+            };
+
+            const loadAndCache = async () => {
                 const enableEMA = document.getElementById('modalEnableEMA')?.checked ?? true;
                 const enableDMA = document.getElementById('modalEnableDMA')?.checked ?? true;
                 const tf = document.getElementById('modalTimeframeSelect')?.value || document.getElementById('timeframeSelect')?.value || '15mins';
                 await loadSymbolChart(symbol, { enableEMA, enableDMA, timeframe: tf, forceRun: true });
             };
-            // Wire checkbox toggles
-            const emaCb = document.getElementById('modalEnableEMA'); if (emaCb) emaCb.onchange = load;
-            const dmaCb = document.getElementById('modalEnableDMA'); if (dmaCb) dmaCb.onchange = load;
-            const reload = document.getElementById('reloadChartBtn'); if (reload) reload.onclick = load;
-            // Wire timeframe dropdown to update chart on change (debounced)
+
+            // Wire checkbox toggles to re-render locally from cache (no API calls)
+            const emaCb = document.getElementById('modalEnableEMA'); if (emaCb) emaCb.onchange = () => renderFromCacheOrNotify({ enableEMA: emaCb.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: document.getElementById('modalTimeframeSelect')?.value });
+            const dmaCb = document.getElementById('modalEnableDMA'); if (dmaCb) dmaCb.onchange = () => renderFromCacheOrNotify({ enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: dmaCb.checked, timeframe: document.getElementById('modalTimeframeSelect')?.value });
+            // Reload button explicitly fetches from server
+            const reload = document.getElementById('reloadChartBtn'); if (reload) reload.onclick = loadAndCache;
+            // Wire timeframe dropdown to update chart from cache only (debounced)
             const tfSelect = document.getElementById('modalTimeframeSelect');
             if (tfSelect) {
-                // Debounce 500ms to prevent accidental double runs
-                const debouncedLoad = debounce(load, 500);
+                const debouncedLocalRender = debounce(() => {
+                    renderFromCacheOrNotify({ enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: tfSelect.value });
+                }, 250);
                 tfSelect.addEventListener('change', () => {
-                    try { debouncedLoad(); } catch(e) { console.warn('Timeframe change handler failed', e); }
+                    try { debouncedLocalRender(); } catch(e) { console.warn('Timeframe change handler failed', e); }
                 });
             }
-            load();
+            // Initial load: fetch and cache (user can then toggle controls without network)
+            loadAndCache();
         }
     async function runScannersForSymbolTimeframe(symbol, timeframe, scanners = ['rsi','ema','dma']) {
         // Run scanners sequentially for the requested timeframe so server computes indicators at the desired granularity
@@ -2586,6 +2731,15 @@
                         if (/^DMA\(/.test(lbl) && !options.enableDMA) continue;
                         cd.datasets.push(ds);
                     }
+                    // Cache combined chart data so modal controls can re-render locally without further API calls
+                    try {
+                        const cacheKey = `${symbol}::${options.timeframe || '15mins'}`;
+                        chartCache[cacheKey] = cd;
+                        // If a renderer helper is available, delegate rendering to it and return early
+                        if (typeof renderCombinedChart === 'function') {
+                            try { renderCombinedChart(cd, symbol, options); return; } catch(e) { /* fallthrough to inline render */ }
+                        }
+                    } catch(e) { /* ignore cache failures */ }
                     // Debugging: list merged datasets in console and show a small toast so user can verify
                     try {
                         const labelsList = cd.datasets.map(ds => ds.label || '<no-label>');
@@ -2880,6 +3034,99 @@
                         console.error('RSI chart render failed', err);
                     }
             } catch (e) { toastr.error('Failed to load chart'); }
+        }
+
+        // renderCombinedChart helper: render combined cd (labels + datasets) into the modal canvases
+        // This allows modal controls (EMA/DMA/timeframe toggles) to re-render locally from cached data
+        function renderCombinedChart(cd, symbol, options = { enableEMA: true, enableDMA: true, timeframe: '15mins' }) {
+            try {
+                if (!cd || !cd.labels || !Array.isArray(cd.labels)) throw new Error('Invalid chart data');
+                const textColor = isDarkMode ? '#f9fafb' : '#374151';
+                const gridColor = isDarkMode ? '#4b5563' : '#e5e7eb';
+
+                // Build filtered datasets according to options
+                const datasets = [];
+                for (const ds of cd.datasets || []) {
+                    const lbl = (ds && ds.label) ? ds.label.toUpperCase() : '';
+                    if (/^EMA\(/.test(lbl) && !options.enableEMA) continue;
+                    if (/^DMA\(/.test(lbl) && !options.enableDMA) continue;
+                    datasets.push(Object.assign({}, ds));
+                }
+
+                // Destroy existing charts if present
+                try { const pc = document.getElementById('symbolPriceCanvas'); const ex = (pc && window.Chart) ? Chart.getChart(pc) : null; if (ex) ex.destroy(); } catch(e) {}
+                try { const rc = document.getElementById('symbolRSICanvas'); const exr = (rc && window.Chart) ? Chart.getChart(rc) : null; if (exr) exr.destroy(); } catch(e) {}
+
+                // Prepare price/top datasets and detect OHLC
+                const allDatasets = datasets;
+                const ohlc = allDatasets.find(d => d.label && d.label.toUpperCase() === 'OHLC');
+                const priceDatasets = [];
+                const candlestickAvailable = (typeof Chart !== 'undefined' && Chart.registry && !!Chart.registry.getController('candlestick'));
+                if (ohlc && candlestickAvailable) {
+                    const mapped = ohlc.data.map((arr, i) => ({ x: i, o: arr[0], h: arr[1], l: arr[2], c: arr[3] }));
+                    priceDatasets.push({ label: 'OHLC', data: mapped, type: 'candlestick' });
+                }
+                let closeDs = allDatasets.find(d => d.label && /close/i.test(d.label));
+                if (!closeDs) closeDs = allDatasets.find(d => d.label && !/rsi|ohlc/i.test(d.label) && Array.isArray(d.data));
+                if (closeDs) priceDatasets.push({ label: closeDs.label || 'Close', data: closeDs.data, type: 'line', borderColor: 'rgb(229,237,243)', backgroundColor: 'rgba(59,130,246,0.08)', fill: false, pointRadius: 0, tension: 0.12 });
+                const indicatorSets = allDatasets.filter(d => d.label && (/EMA/i.test(d.label) || /DMA/i.test(d.label) || /ema_/i.test(d.label) || /dma_/i.test(d.label)));
+                const overlayColors = ['rgb(59,130,246)','rgb(16,185,129)','rgb(249,115,22)','rgb(14,165,233)','rgb(250,204,21)'];
+                indicatorSets.forEach((d,i) => priceDatasets.push({ label: d.label, data: d.data, type: 'line', borderColor: overlayColors[i%overlayColors.length], backgroundColor: 'rgba(0,0,0,0)', fill: false, pointRadius: 0, tension: 0.12 }));
+
+                // Convert line overlays to {x,y} when OHLC present
+                if (ohlc && candlestickAvailable) {
+                    priceDatasets.forEach(ds => {
+                        if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0 && typeof ds.data[0] !== 'object') {
+                            ds.data = ds.data.map((v,i) => ({ x: i, y: (v===null||v===undefined)?null:Number(v) }));
+                            ds.parsing = false; ds.order = 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true;
+                        }
+                    });
+                } else {
+                    priceDatasets.forEach(ds => { if (ds && ds.type === 'line') { ds.order = ds.order || 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true; } });
+                }
+
+                // Build top chart (price)
+                try {
+                    const priceCtx = document.getElementById('symbolPriceCanvas').getContext('2d');
+                    const topType = (ohlc && candlestickAvailable) ? 'candlestick' : 'line';
+                    const topChart = new Chart(priceCtx, {
+                        type: topType,
+                        data: { labels: cd.labels, datasets: priceDatasets },
+                        options: { responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, scales:{ x:{ type:'category', ticks:{ color:textColor }, grid:{ color:gridColor } }, y:{ ticks:{ color:textColor }, grid:{ color:gridColor } } }, plugins:{ legend:{ labels:{ color:textColor } } } }
+                    });
+                    document.getElementById('symbolPriceCanvas')._chart = topChart;
+                } catch(e) { console.warn('Failed to render top chart', e); }
+
+                // RSI chart (bottom)
+                const rsiSets = datasets.filter(ds => ds.label && /RSI/i.test(ds.label));
+                const rsiCanvasParent = document.getElementById('symbolRSICanvas').parentElement;
+                if (!rsiSets || rsiSets.length === 0) {
+                    rsiCanvasParent.style.display = 'none';
+                } else {
+                    rsiCanvasParent.style.display = '';
+                    try {
+                        const rsiCtx = document.getElementById('symbolRSICanvas').getContext('2d');
+                        const rsiDatasets = rsiSets.map((ds,i) => ({ label: ds.label, data: ds.data, borderColor: ['rgb(34,197,94)','rgb(168,85,247)','rgb(251,146,60)'][i%3], backgroundColor:'rgba(0,0,0,0)', fill:false, pointRadius:0, tension:0.1 }));
+                        const overbought = 70, oversold = 30;
+                        const thresholdDatasets = [ { label:'Overbought', data: Array(cd.labels.length).fill(overbought), borderColor:'rgba(239,68,68,0.6)', borderDash:[6,4], pointRadius:0, fill:false, order:0 }, { label:'Oversold', data: Array(cd.labels.length).fill(oversold), borderColor:'rgba(34,197,94,0.6)', borderDash:[6,4], pointRadius:0, fill:false, order:0 } ];
+                        const rsiChart = new Chart(rsiCtx, { type:'line', data:{ labels: cd.labels, datasets: [...rsiDatasets, ...thresholdDatasets] }, options:{ responsive:true, maintainAspectRatio:false, scales:{ x:{ ticks:{ color:textColor }, grid:{ color:gridColor } }, y:{ min:0, max:100, ticks:{ color:textColor }, grid:{ color:gridColor } } }, plugins:{ legend:{ labels:{ color:textColor } } } } });
+                        document.getElementById('symbolRSICanvas')._chart = rsiChart;
+                    } catch(e) { console.warn('Failed to render RSI chart', e); }
+                }
+
+                // Simple hover sync between price and RSI charts
+                try {
+                    const priceCanvas = document.getElementById('symbolPriceCanvas');
+                    const rsiCanvas = document.getElementById('symbolRSICanvas');
+                    const topChart = Chart.getChart(priceCanvas);
+                    const rsiChart = Chart.getChart(rsiCanvas);
+                    function getIndexForEvent(chart, evt) { try { const xScale = chart.scales.x; if (!xScale) return null; const rect = chart.canvas.getBoundingClientRect(); const px = (evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX)) - rect.left; const val = xScale.getValueForPixel(px); return (val===undefined||val===null)?null:Math.round(Number(val)); } catch(e){return null;} }
+                    function syncHover(sourceChart, targetChart, evt) { try { const idx = getIndexForEvent(sourceChart, evt); if (idx===null) { try{ if (targetChart) { targetChart.setActiveElements([]); targetChart.tooltip.setActiveElements([]); targetChart.update('none'); } } catch(e){}; return; } const active=[]; for (let di=0; di<targetChart.data.datasets.length; di++) { const ds=targetChart.data.datasets[di]; if (!ds || !Array.isArray(ds.data)) continue; if (idx>=0 && idx<ds.data.length) { const val = ds.data[idx]; if (val!==null && val!==undefined) active.push({ datasetIndex: di, index: idx }); } } try { if (targetChart) { targetChart.setActiveElements(active); const elPos = { x: sourceChart.canvas.getBoundingClientRect().left + (sourceChart.width||sourceChart.canvas.width)*0.5, y: sourceChart.canvas.getBoundingClientRect().top }; targetChart.tooltip.setActiveElements(active, elPos); targetChart.update('none'); } } catch(e){} } catch(e){} }
+                    priceCanvas.addEventListener('mousemove', function(evt) { try { syncHover(topChart, rsiChart, evt); } catch(e){} });
+                    rsiCanvas.addEventListener('mousemove', function(evt) { try { syncHover(rsiChart, topChart, evt); } catch(e){} });
+                    priceCanvas.addEventListener('mouseleave', function() { try { if (rsiChart) { rsiChart.setActiveElements([]); rsiChart.tooltip.setActiveElements([]); rsiChart.update('none'); } if (topChart) { topChart.setActiveElements([]); topChart.tooltip.setActiveElements([]); topChart.update('none'); } } catch(e){} });
+                } catch(e) { /* ignore sync errors */ }
+            } catch (e) { console.error('renderCombinedChart error', e); }
         }
     </script>
 </body>
