@@ -590,12 +590,44 @@
         }
 
         // Render symbols table
+        // NOTE: To avoid triggering per-symbol API calls when the UI is re-ordered
+        // (for example via sorting), reuse existing <tr id="row-..."> DOM nodes
+        // where possible instead of recreating them. createTableRow() schedules
+        // indicator refreshes for missing fields, so recreating rows on sort or
+        // filter causes a flood of /api requests. Reordering existing nodes keeps
+        // their state intact and prevents unnecessary network traffic.
         function renderSymbolsTable() {
             const tbody = document.getElementById('symbolsTBody');
-            tbody.innerHTML = '';
 
+            // Build sorted list based on currentSort
             const sorted = [...symbols].sort((a, b) => compareByKey(a, b, currentSort.key, currentSort.dir));
-            sorted.forEach(row => tbody.appendChild(createTableRow(row)));
+
+            // Capture existing rows so we can reuse DOM nodes and avoid re-running
+            // the per-row initialization that may trigger API calls.
+            const existingRows = new Map();
+            tbody.querySelectorAll('tr').forEach(tr => {
+                try {
+                    const id = tr.id && tr.id.replace && tr.id.replace('row-','');
+                    if (id) existingRows.set(id, tr);
+                } catch (e) { /* ignore */ }
+            });
+
+            // Clear tbody without destroying nodes (we'll re-append reused nodes)
+            while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+
+            // Append rows in sorted order; reuse existing nodes when available
+            sorted.forEach(item => {
+                const symbolName = (item && item.Symbol) ? item.Symbol : item;
+                const existing = existingRows.get(symbolName);
+                if (existing) {
+                    // Ensure row is visible by clearing inline display (filtering will handle hiding)
+                    existing.style.display = '';
+                    tbody.appendChild(existing);
+                } else {
+                    // Only create a new row when it doesn't already exist (initial load)
+                    tbody.appendChild(createTableRow(item));
+                }
+            });
 
             // wire header sorting
             document.querySelectorAll('#symbolsTable thead th[data-key]')
@@ -611,12 +643,13 @@
                     }
                 });
 
-            // filter
+            // wire search input (if present)
             const search = document.getElementById('tableSearch');
             if (search && !search._wired) {
                 search._wired = true;
                 search.addEventListener('input', () => applyFilter(search.value || ''));
             }
+
             // apply advanced filters after rendering
             applyFilters();
             // build panel-level Reco filters based on current table content
@@ -632,9 +665,13 @@
                 container.innerHTML = '';
                 const title = document.createElement('span'); title.style.opacity = '0.8'; title.style.fontSize = '0.9rem'; title.textContent = 'Reco:';
                 container.appendChild(title);
-                const categories = ['Bull','Neutral','Bear'];
+                // Provide a dedicated filter for rows where Reco is missing ('-').
+                // Render '-' as the last item per request.
+                const categories = ['Bull','Neutral','Bear','-'];
                 categories.forEach(lbl => {
-                    const id = `panel_reco_${lbl.toLowerCase()}`;
+                    // Use a safe id for the '-' option
+                    const idKey = (lbl === '-') ? 'dash' : lbl.toLowerCase();
+                    const id = `panel_reco_${idKey}`;
                     const labelEl = document.createElement('label');
                     labelEl.style.display = 'flex'; labelEl.style.alignItems = 'center'; labelEl.style.gap = '0.25rem';
                     const chk = document.createElement('input'); chk.type = 'checkbox'; chk.id = id; chk.checked = true;
@@ -970,11 +1007,45 @@
                 // If already computed and not pending, skip
                 const state = cell.getAttribute('data-reco-state');
                 if (state === 'done') return;
-                // compute score using DOM fallback; this will read latest EMA/DMA/RSI cells
-                const score = computeRecoScore(symbol);
-                cell.innerHTML = scoreToLabelHtml(score);
-                try { cell.title = buildRecoTooltip(symbol, score); } catch(e) { /* ignore */ }
-                cell.setAttribute('data-reco-state', 'done');
+                // Determine presence of indicators in the row (must have at least one RSI, one EMA and one DMA)
+                const hasIndicator = (prefix) => {
+                    try {
+                        const cols = Object.keys(colIndexMap || {}).filter(k => k.startsWith(prefix));
+                        if (!cols || cols.length === 0) return false;
+                        for (const k of cols) {
+                            const idx = colIndexMap[k];
+                            const c = row.querySelectorAll('td')[idx];
+                            if (!c) continue;
+                            const v = parseNumericFromCell(c, parseFloat(row.querySelectorAll('td')[1]?.getAttribute('data-cmp')||NaN));
+                            if (!isNaN(v)) return true;
+                        }
+                        return false;
+                    } catch (e) { return false; }
+                };
+
+                const hasRsi = hasIndicator('rsi_');
+                const hasEma = hasIndicator('ema_');
+                const hasDma = hasIndicator('dma_');
+
+                // If any scanner for this symbol is currently running, show spinner
+                const runningAny = (scannerStates[symbol] && (scannerStates[symbol].rsi?.status === 'running' || scannerStates[symbol].ema?.status === 'running' || scannerStates[symbol].dma?.status === 'running')) || false;
+                if (runningAny) {
+                    cell.innerHTML = '<span class="reco-neutral"><i class="fas fa-spinner fa-spin" style="margin-right:6px"></i></span>';
+                    cell.setAttribute('data-reco-state', 'running');
+                    return;
+                }
+
+                // Only compute reco when all three indicator groups are available
+                if (hasRsi && hasEma && hasDma) {
+                    const score = computeRecoScore(symbol);
+                    cell.innerHTML = scoreToLabelHtml(score);
+                    try { cell.title = buildRecoTooltip(symbol, score); } catch(e) { /* ignore */ }
+                    cell.setAttribute('data-reco-state', 'done');
+                } else {
+                    // Not all indicators available: show neutral placeholder and remain pending
+                    cell.innerHTML = '<span class="reco-neutral">-</span>';
+                    cell.setAttribute('data-reco-state', 'pending');
+                }
             } catch (e) { console.warn('updateRecoForRow failed', symbol, e); }
         }
 
@@ -1479,7 +1550,10 @@
             if (!isNaN(cmpNum)) cmpCell.setAttribute('data-cmp', String(cmpNum));
             tr.appendChild(cmpCell);
             // create reco cell: show placeholder until indicators are computed and rendered
-            const recoTd = td('<span class="reco-neutral"><i class="fas fa-spinner fa-spin" style="margin-right:6px"></i></span>', 'reco-cell');
+            // Default to a neutral placeholder ('-') while marking as pending so
+            // recomputation/update can still run asynchronously. This avoids
+            // showing a spinner by default but keeps the row eligible for updates.
+            const recoTd = td('<span class="reco-neutral">-</span>', 'reco-cell');
             // mark as pending so other code can opt-in to updating when ready
             recoTd.setAttribute('data-reco-state', 'pending');
             tr.appendChild(recoTd);
@@ -1625,17 +1699,20 @@
             const useEma = document.getElementById('filter_apply_ema')?.checked ?? true;
             const useDma = document.getElementById('filter_apply_dma')?.checked ?? true;
             // Determine Reco visibility settings: prefer dynamic panel filters if present
-            let showBull = true, showNeutral = true, showBear = true;
+            let showDash = true, showBull = true, showNeutral = true, showBear = true;
             const panelContainer = document.getElementById('panelRecoFilters');
             if (panelContainer && panelContainer.querySelectorAll('input[type=checkbox]').length > 0) {
                 // Read simplified 3-category panel checkboxes (Bull / Neutral / Bear)
+                const dashCb = document.getElementById('panel_reco_dash');
                 const bullCb = document.getElementById('panel_reco_bull');
                 const neutralCb = document.getElementById('panel_reco_neutral');
                 const bearCb = document.getElementById('panel_reco_bear');
+                showDash = !!(dashCb && dashCb.checked);
                 showBull = !!(bullCb && bullCb.checked);
                 showNeutral = !!(neutralCb && neutralCb.checked);
                 showBear = !!(bearCb && bearCb.checked);
             } else {
+                showDash = document.getElementById('filter_dash')?.checked ?? true;
                 showBull = document.getElementById('filter_bull')?.checked ?? true;
                 showNeutral = document.getElementById('filter_neutral')?.checked ?? true;
                 showBear = document.getElementById('filter_bear')?.checked ?? true;
@@ -1647,10 +1724,14 @@
                 // Reco check
                 const recoCell = tr.querySelector('.reco-cell');
                 if (recoCell) {
-                    const txt = recoCell.innerText || '';
-                    if (txt.includes('Strong Bull') || txt.includes('Bullish')) {
+                    const txt = (recoCell.innerText || '').trim();
+                    // Normalize typical dash characters to '-'
+                    const normalized = txt.replace(/[\u2012\u2013\u2014\u2212]/g, '-');
+                    if (normalized === '-' || normalized === '\u2014' || normalized.length === 0) {
+                        if (!showDash) visible = false;
+                    } else if (normalized.includes('Strong Bull') || normalized.includes('Bullish')) {
                         if (!showBull) visible = false;
-                    } else if (txt.includes('Strong Bear') || txt.includes('Bearish')) {
+                    } else if (normalized.includes('Strong Bear') || normalized.includes('Bearish')) {
                         if (!showBear) visible = false;
                     } else {
                         if (!showNeutral) visible = false;
@@ -1780,6 +1861,18 @@
             } else {
                 chip.title = `${scanner.toUpperCase()} - ${status}`;
             }
+
+            // Update internal scannerStates object if present and trigger a Reco/UI refresh
+            try {
+                if (!scannerStates[symbol]) scannerStates[symbol] = { rsi:{}, ema:{}, dma:{} };
+                if (scannerStates[symbol][scanner]) {
+                    scannerStates[symbol][scanner].status = status;
+                    scannerStates[symbol][scanner].time = time;
+                }
+            } catch(e) { /* ignore */ }
+
+            // After state change, attempt to refresh the Reco UI for this row so spinner/label updates
+            try { updateRecoForRow(symbol); } catch(e) { /* ignore */ }
         }
 
         // Run individual scanner

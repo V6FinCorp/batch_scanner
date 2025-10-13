@@ -1,6 +1,6 @@
 {
     "symbols": [
-        "ADANIENT"
+        "HCLTECH"
     ],
     "dma_periods": [
         10,
@@ -9,7 +9,7 @@
         100,
         200
     ],
-    "base_timeframe": "5mins",
+    "base_timeframe": "15mins",
     "days_to_list": 4,
     "days_fallback_threshold": 400,
     "displacement": 1
