@@ -2888,15 +2888,21 @@
                             const idx = getIndexForEvent(sourceChart, evt);
                             if (idx === null || isNaN(idx)) {
                                 // clear
-                                try { targetChart.setActiveElements([]); targetChart.update('none'); } catch(e){}
+                                try { targetChart.setActiveElements([]); targetChart.tooltip.setActiveElements([]); targetChart.update('none'); } catch(e){}
                                 return;
                             }
-                            // Build active elements for targetChart: include every dataset that has a value at this index
+                            // Build active elements for targetChart: include every VISIBLE dataset that has a value at this index
                             const active = [];
                             for (let di = 0; di < targetChart.data.datasets.length; di++) {
+                                try {
+                                    // Skip datasets that chart meta marks as hidden (e.g., legend toggled off)
+                                    const meta = targetChart.getDatasetMeta ? targetChart.getDatasetMeta(di) : null;
+                                    if (meta && meta.hidden) continue;
+                                } catch(e) { /* ignore meta access errors */ }
                                 const ds = targetChart.data.datasets[di];
                                 if (!ds || !Array.isArray(ds.data)) continue;
-                                // For OHLC/candlestick the ds.data may contain objects, we only check existence
+                                // Respect dataset-level hidden flag too
+                                if (ds.hidden === true) continue;
                                 if (idx >= 0 && idx < ds.data.length) {
                                     const val = ds.data[idx];
                                     if (val !== null && val !== undefined) active.push({ datasetIndex: di, index: idx });
@@ -2904,9 +2910,18 @@
                             }
                             try {
                                 targetChart.setActiveElements(active);
-                                // Also update tooltip to show on the target chart
-                                const elPos = { x: sourceChart.canvas.getBoundingClientRect().left + (sourceChart.width || sourceChart.canvas.width) * 0.5, y: sourceChart.canvas.getBoundingClientRect().top };
-                                targetChart.tooltip.setActiveElements(active, { x: elPos.x, y: elPos.y });
+                                // Position tooltip slightly offset to avoid overlapping markers
+                                if (active.length > 0) {
+                                    // Prefer pointer coordinates (mouse/touch) and add a larger offset so tooltip
+                                    // does not overlap markers. Use 20px right and 30px down by default.
+                                    const clientX = evt && (evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX)) ? (evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX)) : (sourceChart.canvas.getBoundingClientRect().left + (sourceChart.width || sourceChart.canvas.width) * 0.5);
+                                    const clientY = evt && (evt.clientY || (evt.touches && evt.touches[0] && evt.touches[0].clientY)) ? (evt.clientY || (evt.touches && evt.touches[0] && evt.touches[0].clientY)) : sourceChart.canvas.getBoundingClientRect().top;
+                                    const x = clientX + 50;
+                                    const y = clientY + 30;
+                                    targetChart.tooltip.setActiveElements(active, { x: x, y: y });
+                                } else {
+                                    targetChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+                                }
                                 targetChart.update('none');
                             } catch (e) {
                                 // ignore errors from tooltip API if not available
@@ -3121,11 +3136,127 @@
                     const topChart = Chart.getChart(priceCanvas);
                     const rsiChart = Chart.getChart(rsiCanvas);
                     function getIndexForEvent(chart, evt) { try { const xScale = chart.scales.x; if (!xScale) return null; const rect = chart.canvas.getBoundingClientRect(); const px = (evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX)) - rect.left; const val = xScale.getValueForPixel(px); return (val===undefined||val===null)?null:Math.round(Number(val)); } catch(e){return null;} }
-                    function syncHover(sourceChart, targetChart, evt) { try { const idx = getIndexForEvent(sourceChart, evt); if (idx===null) { try{ if (targetChart) { targetChart.setActiveElements([]); targetChart.tooltip.setActiveElements([]); targetChart.update('none'); } } catch(e){}; return; } const active=[]; for (let di=0; di<targetChart.data.datasets.length; di++) { const ds=targetChart.data.datasets[di]; if (!ds || !Array.isArray(ds.data)) continue; if (idx>=0 && idx<ds.data.length) { const val = ds.data[idx]; if (val!==null && val!==undefined) active.push({ datasetIndex: di, index: idx }); } } try { if (targetChart) { targetChart.setActiveElements(active); const elPos = { x: sourceChart.canvas.getBoundingClientRect().left + (sourceChart.width||sourceChart.canvas.width)*0.5, y: sourceChart.canvas.getBoundingClientRect().top }; targetChart.tooltip.setActiveElements(active, elPos); targetChart.update('none'); } } catch(e){} } catch(e){} }
+                    function syncHover(sourceChart, targetChart, evt) {
+                        try {
+                            const idx = getIndexForEvent(sourceChart, evt);
+                            if (idx === null) {
+                                try { if (targetChart) { targetChart.setActiveElements([]); targetChart.tooltip.setActiveElements([]); targetChart.update('none'); } } catch(e){}
+                                return;
+                            }
+                            const active = [];
+                            for (let di = 0; di < targetChart.data.datasets.length; di++) {
+                                try {
+                                    const meta = targetChart.getDatasetMeta ? targetChart.getDatasetMeta(di) : null;
+                                    if (meta && meta.hidden) continue;
+                                } catch(e) {}
+                                const ds = targetChart.data.datasets[di];
+                                if (!ds || !Array.isArray(ds.data)) continue;
+                                if (ds.hidden === true) continue;
+                                if (idx >= 0 && idx < ds.data.length) {
+                                    const val = ds.data[idx];
+                                    if (val !== null && val !== undefined) active.push({ datasetIndex: di, index: idx });
+                                }
+                            }
+                            try {
+                                if (targetChart) {
+                                    targetChart.setActiveElements(active);
+                                    if (active.length > 0) {
+                                        const clientX = evt && (evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX)) ? (evt.clientX || (evt.touches && evt.touches[0] && evt.touches[0].clientX)) : (sourceChart.canvas.getBoundingClientRect().left + (sourceChart.width || sourceChart.canvas.width) * 0.5);
+                                        const clientY = evt && (evt.clientY || (evt.touches && evt.touches[0] && evt.touches[0].clientY)) ? (evt.clientY || (evt.touches && evt.touches[0] && evt.touches[0].clientY)) : sourceChart.canvas.getBoundingClientRect().top;
+                                        const x = clientX + 50;
+                                        const y = clientY + 30;
+                                        targetChart.tooltip.setActiveElements(active, { x: x, y: y });
+                                    } else {
+                                        targetChart.tooltip.setActiveElements([], { x: 0, y: 0 });
+                                    }
+                                    targetChart.update('none');
+                                }
+                            } catch(e) {}
+                        } catch(e) {}
+                    }
                     priceCanvas.addEventListener('mousemove', function(evt) { try { syncHover(topChart, rsiChart, evt); } catch(e){} });
                     rsiCanvas.addEventListener('mousemove', function(evt) { try { syncHover(rsiChart, topChart, evt); } catch(e){} });
                     priceCanvas.addEventListener('mouseleave', function() { try { if (rsiChart) { rsiChart.setActiveElements([]); rsiChart.tooltip.setActiveElements([]); rsiChart.update('none'); } if (topChart) { topChart.setActiveElements([]); topChart.tooltip.setActiveElements([]); topChart.update('none'); } } catch(e){} });
                 } catch(e) { /* ignore sync errors */ }
+                // --- Crosshair overlay: draw vertical/horizontal cross marker synchronized between charts ---
+                try {
+                    const createOverlay = (baseCanvas, id) => {
+                        let overlay = document.getElementById(id);
+                        const parent = baseCanvas.parentElement;
+                        if (!parent) return null;
+                        parent.style.position = parent.style.position || 'relative';
+                        if (!overlay) {
+                            overlay = document.createElement('canvas');
+                            overlay.id = id;
+                            overlay.style.position = 'absolute';
+                            overlay.style.left = '0'; overlay.style.top = '0';
+                            overlay.style.width = '100%'; overlay.style.height = '100%';
+                            overlay.style.pointerEvents = 'none';
+                            overlay.style.zIndex = 1001;
+                            parent.appendChild(overlay);
+                        }
+                        const resize = () => {
+                            const rect = baseCanvas.getBoundingClientRect();
+                            const dpr = window.devicePixelRatio || 1;
+                            overlay.width = Math.round(rect.width * dpr);
+                            overlay.height = Math.round(rect.height * dpr);
+                            overlay.style.width = rect.width + 'px';
+                            overlay.style.height = rect.height + 'px';
+                            const ctx = overlay.getContext('2d'); if (ctx) ctx.setTransform(dpr,0,0,dpr,0,0);
+                        };
+                        // initial resize
+                        resize();
+                        // keep in sync on window resize
+                        window.addEventListener('resize', resize);
+                        return { overlay, resize };
+                    };
+
+                    const priceOverlayObj = createOverlay(document.getElementById('symbolPriceCanvas'), 'symbolPriceOverlay');
+                    const rsiOverlayObj = createOverlay(document.getElementById('symbolRSICanvas'), 'symbolRsiOverlay');
+
+                    const drawCross = (overlay, x, y) => {
+                        if (!overlay) return;
+                        const ctx = overlay.getContext('2d');
+                        if (!ctx) return;
+                        const rect = overlay.getBoundingClientRect();
+                        ctx.clearRect(0,0,rect.width,rect.height);
+                        ctx.save();
+                        ctx.strokeStyle = 'rgba(120,120,120,0.9)';
+                        ctx.lineWidth = 1;
+                        // vertical
+                        ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, rect.height); ctx.stroke();
+                        // horizontal
+                        ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(rect.width, y + 0.5); ctx.stroke();
+                        // circle at intersection
+                        ctx.fillStyle = 'rgba(80,80,80,0.9)'; ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI*2); ctx.fill();
+                        ctx.restore();
+                    };
+
+                    const clearOverlay = (overlay) => { if (!overlay) return; const ctx = overlay.getContext('2d'); if (!ctx) return; const rect = overlay.getBoundingClientRect(); ctx.clearRect(0,0,rect.width,rect.height); };
+
+                    const priceCanvasEl = document.getElementById('symbolPriceCanvas');
+                    const rsiCanvasEl = document.getElementById('symbolRSICanvas');
+                    if (priceCanvasEl) {
+                        priceCanvasEl.addEventListener('mousemove', function(evt) {
+                            try {
+                                const prect = priceCanvasEl.getBoundingClientRect();
+                                const rx = evt.clientX - prect.left;
+                                const ry = evt.clientY - prect.top;
+                                if (priceOverlayObj && priceOverlayObj.overlay) drawCross(priceOverlayObj.overlay, rx, ry);
+                                // mirror vertical line to RSI overlay using relative X proportion
+                                if (rsiOverlayObj && rsiOverlayObj.overlay) {
+                                    const rrect = rsiCanvasEl.getBoundingClientRect();
+                                    const ratio = (rx / prect.width) || 0;
+                                    const rxPos = Math.round(rrect.width * ratio);
+                                    // place horizontal in middle of RSI overlay
+                                    const ryMid = Math.round(rrect.height * 0.5);
+                                    drawCross(rsiOverlayObj.overlay, rxPos, ryMid);
+                                }
+                            } catch(e) {}
+                        });
+                        priceCanvasEl.addEventListener('mouseleave', function() { try { if (priceOverlayObj) clearOverlay(priceOverlayObj.overlay); if (rsiOverlayObj) clearOverlay(rsiOverlayObj.overlay); } catch(e){} });
+                    }
+                } catch(e) { console.warn('crosshair overlay setup failed', e); }
             } catch (e) { console.error('renderCombinedChart error', e); }
         }
     </script>

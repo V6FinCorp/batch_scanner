@@ -1,0 +1,12 @@
+{
+    "symbols": [
+        "ADANIENT"
+    ],
+    "ema_periods": [
+        9,
+        15
+    ],
+    "base_timeframe": "15mins",
+    "days_to_list": 4,
+    "days_fallback_threshold": 200
+}
