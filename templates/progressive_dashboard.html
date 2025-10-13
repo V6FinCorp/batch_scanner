@@ -1915,6 +1915,69 @@
                 if (result.returncode === 0) {
                     updateScannerChip(symbol, scanner, 'success', executionTime);
                     toastr.success(`${scanner.toUpperCase()} completed for ${symbol} in ${executionTime}s`, 'Success');
+                    // Best-effort: if the scanner run returned an immediate CMP/last price
+                    // include it into the row so CMP is visible without a page refresh.
+                    try {
+                        const possibleCmpKeys = ['CMP','cmp','last','price','close','close_price'];
+                        let cmpFromResult = NaN;
+                        if (result) {
+                            for (const k of possibleCmpKeys) {
+                                if (result[k] !== undefined && result[k] !== null) { cmpFromResult = Number(result[k]); break; }
+                                if (result.data && result.data[k] !== undefined && result.data[k] !== null) { cmpFromResult = Number(result.data[k]); break; }
+                                if (result.payload && result.payload[k] !== undefined && result.payload[k] !== null) { cmpFromResult = Number(result.payload[k]); break; }
+                            }
+                        }
+                        if (isFinite(cmpFromResult) && cmpFromResult !== 0) {
+                            const row = document.getElementById(`row-${symbol}`);
+                            if (row) {
+                                const cells = row.querySelectorAll('td');
+                                const cmpCell = cells[1];
+                                if (cmpCell) {
+                                    cmpCell.innerHTML = Number(cmpFromResult).toFixed(2);
+                                    cmpCell.setAttribute('data-cmp', String(cmpFromResult));
+                                }
+                                // Also refresh mini candle immediately
+                                try { observeMiniCanvas(symbol); loadMiniSpark(symbol).catch(()=>{}); } catch(e) {}
+                            }
+                        }
+                        // Also check for RSI-60-like values in the run result and update that cell immediately
+                        try {
+                            const rsiCandidates = [];
+                            const srcs = [result, result.data, result.payload];
+                            const rsiRegex = /rsi[_-]?(60|1h|60m|min|mins)?$/i;
+                            for (const src of srcs) {
+                                if (!src || typeof src !== 'object') continue;
+                                for (const k of Object.keys(src)) {
+                                    if (rsiRegex.test(k)) {
+                                        const val = Number(src[k]);
+                                        if (!isNaN(val)) rsiCandidates.push({ key: k, val });
+                                    }
+                                }
+                            }
+                            if (rsiCandidates.length > 0) {
+                                const row = document.getElementById(`row-${symbol}`);
+                                if (row) {
+                                    const cells = row.querySelectorAll('td');
+                                    // Prefer exact 'rsi_60' in colIndexMap if present, else use the first candidate
+                                    const preferredKey = (colIndexMap && colIndexMap['rsi_60'] !== undefined) ? 'rsi_60' : rsiCandidates[0].key;
+                                    const colKey = Object.keys(colIndexMap || {}).find(k => k.toLowerCase() === preferredKey.toLowerCase()) || preferredKey;
+                                    const idx = colIndexMap && colIndexMap[colKey];
+                                    const rsiVal = rsiCandidates[0].val;
+                                    if (idx !== undefined && cells[idx]) {
+                                        // Colorize like other RSI cells
+                                        const n = Number(rsiVal);
+                                        let out = '<span class="cell-muted">-</span>';
+                                        if (!isNaN(n)) {
+                                            if (n >= 70) out = `<span class="rsi-neg">${n.toFixed(2)}</span>`;
+                                            else if (n <= 30) out = `<span class="rsi-pos">${n.toFixed(2)}</span>`;
+                                            else out = `<span class="rsi-neutral">${n.toFixed(2)}</span>`;
+                                        }
+                                        cells[idx].innerHTML = out;
+                                    }
+                                }
+                            }
+                        } catch(e) { /* ignore RSI immediate update errors */ }
+                    } catch(e) { /* ignore */ }
                     await refreshRow(symbol, scanner);
                 } else {
                     throw new Error(result.error || `Scanner returned code ${result.returncode}`);
@@ -2068,6 +2131,25 @@
                 const cells = row.querySelectorAll('td');
                 // Use dynamic colIndexMap built by header builder
                 const colIndex = colIndexMap || {};
+                // --- Safe CMP update: update CMP immediately if payload provides a valid non-zero value.
+                try {
+                    const possibleCmpKeys = ['CMP','cmp','Cmp','last','Last'];
+                    let cmpFromPayload = NaN;
+                    for (const k of possibleCmpKeys) {
+                        if (d && d[k] !== undefined && d[k] !== null) {
+                            const n = Number(d[k]);
+                            if (!isNaN(n)) { cmpFromPayload = n; break; }
+                        }
+                    }
+                    // Apply only when payload CMP is a finite non-zero number to avoid accidental 0.00 overwrites
+                    if (isFinite(cmpFromPayload) && cmpFromPayload !== 0) {
+                        const cmpCell = cells[1];
+                        if (cmpCell) {
+                            cmpCell.innerHTML = Number(cmpFromPayload).toFixed(2);
+                            cmpCell.setAttribute('data-cmp', String(cmpFromPayload));
+                        }
+                    }
+                } catch(e) { /* ignore cmp write errors */ }
                 for (const key of map[scanner]) {
                     // accept alternate key names returned by older APIs
                     const alternates = [key];
