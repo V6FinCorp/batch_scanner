@@ -40,6 +40,11 @@ UNIT = "minutes"  # Options: minutes, days, weeks, months
 INTERVAL = 5  # Candle interval in the specified unit
 INTERVALS = [5]  # List of intervals to fetch (for multiple intervals)
 
+# Freshness threshold (minutes) used to decide whether a combined CSV is stale
+# If the most recent timestamp in the combined CSV for today is older than this
+# value, the loader will fetch the latest intraday chunks before computing indicators.
+STALE_THRESHOLD_MINUTES = 5
+
 # Authentication (optional)
 # Set UPSTOX_ACCESS_TOKEN environment variable for authenticated requests
 # If not set, requests will be made without authentication

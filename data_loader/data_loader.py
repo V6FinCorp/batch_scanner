@@ -129,32 +129,67 @@ def fetch_data_for_symbol(symbol, days_back=30):
                         existing_df['timestamp'] = pd.to_datetime(existing_df['timestamp'])
                         existing_start = existing_df['timestamp'].min().date()
                         existing_end = existing_df['timestamp'].max().date()
-                        
+
                         # Calculate required date range
                         today = datetime.now(timezone.utc).date()
                         end_date = today
                         while not is_trading_day(end_date) and (today - end_date).days < 10:
                             end_date = end_date - timedelta(days=1)
-                        
+
                         start_date = end_date - timedelta(days=days_back)
                         while not is_trading_day(start_date) and (start_date - (end_date - timedelta(days=days_back))).days < 10:
                             start_date = start_date + timedelta(days=1)
-                        
+
                         # Validate date range
                         if existing_start <= start_date and existing_end >= end_date:
                             logger.info(f"Existing data for {symbol} covers the required date range ({existing_start} to {existing_end})")
                             logger.info(f"Using existing combined file: {combined_filepath} ({len(existing_df)} records)")
-                            
+
                             # Check data quality
                             invalid_data = (existing_df['high'] < existing_df['low']) | (existing_df['open'] <= 0) | (existing_df['close'] <= 0)
+                            invalid_pct = 0.0
                             if invalid_data.any():
                                 invalid_pct = 100 * invalid_data.sum() / len(existing_df)
-                                if invalid_pct > 5:  # If more than 5% of data is invalid
-                                    logger.warning(f"Existing data has {invalid_pct:.1f}% invalid OHLC values, will fetch new data")
-                                else:
-                                    logger.info(f"Existing data has {invalid_pct:.1f}% invalid OHLC values, but will use it")
-                                    
-                                    # Clean up any leftover chunk files if KEEP_CHUNK_FILES is False
+                                logger.warning(f"Existing data has {invalid_pct:.1f}% invalid OHLC values")
+
+                            # Perform a freshness check for intraday data regardless of data-quality
+                            try:
+                                max_ts = existing_df['timestamp'].max()
+                                # Make both times timezone-aware in Asia/Kolkata for proper comparison
+                                try:
+                                    # Convert max_ts to pandas.Timestamp if not already
+                                    max_ts = pd.to_datetime(max_ts)
+                                    if max_ts.tzinfo is None:
+                                        # Assume CSV timestamps are in IST if they have offset or naive - localize accordingly
+                                        max_ts = max_ts.tz_localize('Asia/Kolkata')
+                                    else:
+                                        max_ts = max_ts.tz_convert('Asia/Kolkata')
+                                except Exception:
+                                    # Fallback: parse without tz
+                                    max_ts = pd.to_datetime(max_ts)
+
+                                now = pd.Timestamp.now(tz='Asia/Kolkata')
+
+                                # If the combined file has data for today but the most recent
+                                # timestamp is older than configured threshold, consider it stale.
+                                # Read from on-disk config if available, else fall back to 5 minutes.
+                                try:
+                                    stale_threshold_minutes = int(getattr(base_cfg, 'STALE_THRESHOLD_MINUTES', 5))
+                                except Exception:
+                                    stale_threshold_minutes = 5
+                                is_stale = False
+                                try:
+                                    if isinstance(max_ts, pd.Timestamp):
+                                        # Compare using tz-aware timestamps
+                                        delta = now - max_ts
+                                        if max_ts.date() == now.date() and delta > timedelta(minutes=stale_threshold_minutes):
+                                            is_stale = True
+                                except Exception:
+                                    # Conservatively treat as not-stale on parse errors
+                                    is_stale = False
+
+                                if not is_stale and invalid_pct <= 5.0:
+                                    # Clean up leftover chunk files if KEEP_CHUNK_FILES is False
                                     keep_chunk_files = getattr(base_cfg, 'KEEP_CHUNK_FILES', True)
                                     if not keep_chunk_files:
                                         import glob
@@ -168,28 +203,19 @@ def fetch_data_for_symbol(symbol, days_back=30):
                                                     logger.debug(f"Removed leftover chunk file: {chunk_file}")
                                                 except Exception as e:
                                                     logger.warning(f"Failed to remove chunk file {chunk_file}: {e}")
-                                    
+
                                     return combined_filepath
-                            else:
-                                # Clean up any leftover chunk files if KEEP_CHUNK_FILES is False
-                                keep_chunk_files = getattr(base_cfg, 'KEEP_CHUNK_FILES', True)
-                                if not keep_chunk_files:
-                                    import glob
-                                    chunk_pattern = os.path.join(symbol_dir, f"{symbol}_5_*.csv")
-                                    chunk_files_to_clean = [f for f in glob.glob(chunk_pattern) if 'combined' not in f]
-                                    if chunk_files_to_clean:
-                                        logger.info(f"Cleaning up {len(chunk_files_to_clean)} leftover chunk files (KEEP_CHUNK_FILES=False)")
-                                        for chunk_file in chunk_files_to_clean:
-                                            try:
-                                                os.remove(chunk_file)
-                                                logger.debug(f"Removed leftover chunk file: {chunk_file}")
-                                            except Exception as e:
-                                                logger.warning(f"Failed to remove chunk file {chunk_file}: {e}")
-                                
-                                return combined_filepath
+                                else:
+                                    logger.info(f"Existing combined file not suitable (stale={is_stale}, invalid_pct={invalid_pct:.1f}) — will fetch fresh data")
+                            except Exception as e:
+                                logger.warning(f"Error checking freshness of existing combined file: {e}")
+                                # If any error occurs while checking freshness, fallthrough and fetch new data
                         else:
                             logger.info(f"Existing data for {symbol} ({existing_start} to {existing_end}) doesn't cover required range ({start_date} to {end_date})")
                             logger.info("Fetching additional data...")
+                    except Exception as e:
+                        logger.warning(f"Error validating date range for {symbol}: {e}")
+                        logger.info("Fetching new data due to validation error...")
                     except Exception as e:
                         logger.warning(f"Error validating date range for {symbol}: {e}")
                         logger.info("Fetching new data due to validation error...")
@@ -539,14 +565,49 @@ def fetch_data_for_symbol(symbol, days_back=30):
             return [(start_str, end_str)]
 
     # Use monthly chunks for efficient data retrieval
-    all_chunks = split_date_range_by_month(start_date_str, end_date_str)
+    # If a combined file already exists, compute only the missing date range to avoid re-downloading
+    all_chunks = []
+    try:
+        if os.path.exists(combined_filepath):
+            # Read only timestamps to determine existing coverage
+            import pandas as _pd
+            try:
+                existing_ts = _pd.read_csv(combined_filepath, usecols=['timestamp'])
+                existing_ts['timestamp'] = _pd.to_datetime(existing_ts['timestamp'])
+                existing_max_ts = existing_ts['timestamp'].max()
+                # Use the date of the last available timestamp as the base for missing data
+                existing_max_date = existing_max_ts.date()
+
+                # If last timestamp is earlier on the same end_date, we still want to include that date
+                # so use existing_max_date (not +1 day). The missing range is from max(requested start_date, existing_max_date)
+                missing_start_date = existing_max_date
+                if missing_start_date < start_date:
+                    missing_start_date = start_date
+
+                # If end_date is today, cap monthly chunks to yesterday because today's
+                # intraday data is fetched separately (cheaper and more appropriate).
+                today_dt = datetime.now(timezone.utc).date()
+                chunk_end_date = end_date
+                if end_date == today_dt:
+                    chunk_end_date = end_date - timedelta(days=1)
+
+                if missing_start_date <= chunk_end_date:
+                    all_chunks = split_date_range_by_month(missing_start_date.strftime('%Y-%m-%d'), chunk_end_date.strftime('%Y-%m-%d'))
+                else:
+                    all_chunks = []
+            except Exception:
+                # If we fail to read existing combined file quickly, fall back to full range
+                all_chunks = split_date_range_by_month(start_date_str, end_date_str)
+        else:
+            all_chunks = split_date_range_by_month(start_date_str, end_date_str)
+    except Exception:
+        all_chunks = split_date_range_by_month(start_date_str, end_date_str)
     chunk_count = len(all_chunks)
     
     if chunk_count == 0:
-        return report_error("date", "No valid date chunks created", 
-                          {"start": start_date_str, "end": end_date_str})
-                          
-    logger.info(f"Total required chunks: {chunk_count}")
+        logger.info("No monthly chunks required; will attempt intraday/current-day fetch only")
+    else:
+        logger.info(f"Total required chunks: {chunk_count}")
     
     # Download chunks
     chunk_files = []
@@ -604,8 +665,8 @@ def fetch_data_for_symbol(symbol, days_back=30):
                 "error": last_error
             })
     
-    # Report error if all chunks failed
-    if failed_chunks and len(failed_chunks) == chunk_count:
+    # Report error if all chunks failed (only when we expected chunks)
+    if chunk_count > 0 and failed_chunks and len(failed_chunks) == chunk_count:
         return report_error("api", f"All {chunk_count} data chunks failed to download", 
                           {"symbol": symbol, "failed_chunks": failed_chunks})
     
@@ -613,8 +674,8 @@ def fetch_data_for_symbol(symbol, days_back=30):
     if failed_chunks:
         logger.warning(f"{len(failed_chunks)}/{chunk_count} chunks failed for {symbol}")
         
-    # Continue with available data if at least one chunk succeeded
-    if not chunk_files:
+    # Continue with available data if at least one chunk succeeded (only required when chunk_count>0)
+    if chunk_count > 0 and not chunk_files:
         return report_error("api", "No data chunks were successfully downloaded", 
                           {"symbol": symbol, "days_back": days_back})
     
@@ -768,84 +829,94 @@ def fetch_data_for_symbol(symbol, days_back=30):
     
     # Create combined file
     if chunk_files:
+        # If combined file exists, start combined_data from its existing lines to append only new data
         combined_data = []
+        header_line = None
         processed_files = 0
         error_count = 0
-        
+
+        # If an existing combined file exists, preload its data lines (skip header)
+        if os.path.exists(combined_filepath):
+            try:
+                with open(combined_filepath, 'r', encoding='utf-8') as ef:
+                    existing_lines = ef.readlines()
+                    if existing_lines:
+                        # find header and use remaining as initial combined_data
+                        if existing_lines[0].strip().startswith('timestamp'):
+                            header_line = existing_lines[0].strip()
+                            combined_data.extend([ln.strip() for ln in existing_lines[1:] if ln.strip()])
+                        else:
+                            combined_data.extend([ln.strip() for ln in existing_lines if ln.strip()])
+            except Exception as e:
+                logger.warning(f"Failed to preload existing combined file {combined_filepath}: {e}")
+
         for chunk_file in chunk_files:
             try:
                 with open(chunk_file, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
                     if len(lines) > 1:  # Has header + data
-                        # Skip header for all but first file
-                        data_lines = lines[1:] if combined_data else lines
+                        data_lines = [ln.strip() for ln in lines[1:] if ln.strip()]
                         combined_data.extend(data_lines)
                 processed_files += 1
             except Exception as e:
                 error_count += 1
                 logger.warning(f"Failed to read chunk file {chunk_file}: {e}")
-        
-        if processed_files == 0:
-            return report_error("system", "Failed to read any chunk files", 
+
+        if processed_files == 0 and not combined_data:
+            return report_error("system", "Failed to read any chunk files and no existing combined data available", 
                               {"total_chunks": len(chunk_files), "errors": error_count})
-                              
+
         if error_count > 0:
             logger.warning(f"Encountered {error_count} errors while reading {len(chunk_files)} chunk files")
-        
+
         if not combined_data:
-            return report_error("data", "No data found in chunk files", 
+            return report_error("data", "No data found in chunk files or existing combined file", 
                               {"processed_files": processed_files, "total_chunks": len(chunk_files)})
-        
+
         # Remove duplicates and sort
         try:
             seen_timestamps = set()
             unique_data = []
-            header_line = None
-            
+
             for line in combined_data:
-                line = line.strip()
                 if not line:
                     continue
-                    
-                if line.startswith('timestamp,'):
-                    header_line = line
-                    continue
-                    
                 parts = line.split(',')
                 if len(parts) >= 6:
                     timestamp = parts[0]
                     if timestamp not in seen_timestamps:
                         seen_timestamps.add(timestamp)
                         unique_data.append(line)
-            
+
+            # Determine header_line if not set
             if not header_line:
                 header_line = 'timestamp,open,high,low,close,volume'
-                
+
             # Sort by timestamp
             unique_data.sort(key=lambda x: x.split(',')[0])
-            
+
             # Create symbol directory if it doesn't exist
             symbol_dir = os.path.join(custom_config.OUTPUT_DIRECTORY, symbol.upper())
             os.makedirs(symbol_dir, exist_ok=True)
-            
+
             # Define combined file path
             combined_filename = f"{symbol}_5_combined.csv"
             combined_filepath = os.path.join(symbol_dir, combined_filename)
-            
+
             # Write combined file
             with open(combined_filepath, 'w', encoding='utf-8') as f:
                 f.write(f"{header_line}\n")
                 for line in unique_data:
                     f.write(f"{line}\n")
-            
+
             record_count = len(unique_data)
-            logger.info(f"Combined file created: {combined_filepath} ({record_count} records)")
-            
+            logger.info(f"Combined file updated: {combined_filepath} ({record_count} records)")
+
             # Data validation
             if record_count == 0:
                 return report_error("data", "Combined file has no data records", 
                                   {"filepath": combined_filepath})
-            
+
             # Clean up chunk files if KEEP_CHUNK_FILES is False
             keep_chunk_files = getattr(custom_config, 'KEEP_CHUNK_FILES', False)
             if not keep_chunk_files:
@@ -859,12 +930,12 @@ def fetch_data_for_symbol(symbol, days_back=30):
                             logger.debug(f"Removed chunk file: {chunk_file}")
                     except Exception as e:
                         logger.warning(f"Failed to remove chunk file {chunk_file}: {e}")
-                
+
                 if cleanup_count > 0:
                     logger.info(f"Cleaned up {cleanup_count}/{len(chunk_files)} chunk files")
-            
+
             return combined_filepath
-            
+
         except Exception as e:
             return report_error("system", f"Error processing combined data: {e}", 
                               {"processed_files": processed_files, "error": traceback.format_exc()})
