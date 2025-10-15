@@ -332,6 +332,71 @@
     let chartInstance = null;
     // Cache combined chart data per symbol+timeframe so modal controls can re-render locally
     const chartCache = {};
+
+    // Global helper: fetch and cache existing chart data (read-only GETs). Does NOT run scanners.
+    async function fetchAndCacheChartData(sym, opts = { enableEMA: true, enableDMA: true, timeframe: '15mins' }) {
+        try {
+            const enableEMA = opts.enableEMA ?? true;
+            const enableDMA = opts.enableDMA ?? true;
+            const tf = opts.timeframe || '15mins';
+            const q = `?timeframe=${encodeURIComponent(tf)}`;
+            let combined = { labels: null, datasets: [] };
+            const seenLabels = new Set();
+
+            // Fetch OHLC resampled for timeframe (read-only)
+            try {
+                const ohlcRes = await fetch(`/api/chart-data/ohlc/${encodeURIComponent(sym)}${q}`, { cache: 'no-store' }).catch(() => null);
+                if (ohlcRes && ohlcRes.ok) {
+                    const ohlcPayload = await ohlcRes.json().catch(() => null);
+                    if (ohlcPayload && ohlcPayload.chartData) {
+                        const part = ohlcPayload.chartData;
+                        if (Array.isArray(part.labels)) combined.labels = part.labels.slice();
+                        if (Array.isArray(part.datasets)) {
+                            for (const ds of part.datasets) {
+                                const label = (ds && ds.label) ? ds.label : JSON.stringify(ds);
+                                if (seenLabels.has(label)) continue;
+                                seenLabels.add(label);
+                                const copy = Object.assign({}, ds);
+                                if (Array.isArray(ds.data)) copy.data = ds.data.slice();
+                                combined.datasets.push(copy);
+                            }
+                        }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            // Fetch indicator datasets read-only (single attempt per scanner)
+            const scanners = ['rsi','ema','dma'];
+            for (const s of scanners) {
+                try {
+                    const res = await fetch(`/api/chart-data/${s}/${encodeURIComponent(sym)}`, { cache: 'no-store' }).catch(() => null);
+                    if (!res || !res.ok) continue;
+                    const payload = await res.json().catch(() => null);
+                    if (!payload || !payload.chartData) continue;
+                    const part = payload.chartData;
+                    if (!combined.labels && Array.isArray(part.labels)) combined.labels = part.labels.slice();
+                    if (Array.isArray(part.datasets)) {
+                        for (const ds of part.datasets) {
+                            const label = (ds && ds.label) ? ds.label : JSON.stringify(ds);
+                            if (seenLabels.has(label)) continue;
+                            seenLabels.add(label);
+                            const copy = Object.assign({}, ds);
+                            if (Array.isArray(ds.data)) copy.data = ds.data.slice();
+                            combined.datasets.push(copy);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            if ((!combined.labels || combined.labels.length === 0) && (!combined.datasets || combined.datasets.length === 0)) {
+                return null;
+            }
+
+            const cd = { labels: combined.labels ? combined.labels.slice() : [], datasets: combined.datasets.slice() };
+            try { chartCache[`${sym}::${tf}`] = cd; } catch(e){}
+            return cd;
+        } catch (e) { console.warn('fetchAndCacheChartData failed', e); return null; }
+    }
     // Column index map for dynamic header columns
     let colIndexMap = {};
         // Modal progress toast handle (to update/clear persistent progress messages)
@@ -2120,6 +2185,24 @@
                             }
                         } catch(e) { /* ignore RSI immediate update errors */ }
                     } catch(e) { /* ignore */ }
+                    // Mark availability flags on symbol object so UI knows data exists
+                    try {
+                        const symObj = symbols.find(s => (s && (s.Symbol === symbol || s === symbol)));
+                        if (symObj) {
+                            symObj.OHLC_Available = true;
+                            if (scanner === 'rsi') symObj.RSI_Available = true;
+                            if (scanner === 'ema') symObj.EMA_Available = true;
+                            if (scanner === 'dma') symObj.DMA_Available = true;
+                        }
+                    } catch(e) { /* ignore */ }
+
+                    // Prefetch and cache existing chart data (read-only) for the current timeframe so modal can render immediately
+                    try {
+                        const tf = document.getElementById('timeframeSelect')?.value || '15mins';
+                        // Best-effort: fetch and cache without forcing server runs
+                        fetchAndCacheChartData(symbol, { enableEMA: true, enableDMA: true, timeframe: tf }).catch(() => {});
+                    } catch(e) { /* ignore */ }
+
                     await refreshRow(symbol, scanner);
                 } else {
                     throw new Error(result.error || `Scanner returned code ${result.returncode}`);
@@ -2562,6 +2645,53 @@
             }
             document.getElementById('chartSymbolName').textContent = symbol;
             modal.style.display = 'block';
+            // Helper: show placeholder text in modal canvases (no network calls)
+            function showModalPlaceholder(msg) {
+                try {
+                    const pc = document.getElementById('symbolPriceCanvas');
+                    const rc = document.getElementById('symbolRSICanvas');
+                    // Destroy existing Chart.js instances to avoid stale renderings
+                    try {
+                        [pc, rc].forEach(c => {
+                            if (!c) return;
+                            try {
+                                const existing = (window.Chart && Chart.getChart) ? Chart.getChart(c) : null;
+                                if (existing) { try { existing.destroy(); } catch(e){} }
+                                try { if (c._chart) c._chart = null; } catch(e){}
+                            } catch(e) { /* ignore */ }
+                        });
+                    } catch (e) { /* ignore */ }
+
+                    [pc, rc].forEach(canvas => {
+                        if (!canvas) return;
+                        // ensure parent is visible so getBoundingClientRect returns correct size
+                        try { if (canvas.parentElement) canvas.parentElement.style.display = ''; } catch(e){}
+                        const rect = canvas.getBoundingClientRect();
+                        const cssW = Math.max(1, Math.round(rect.width)) || 600;
+                        const cssH = Math.max(1, Math.round(rect.height)) || 160;
+                        const dpr = window.devicePixelRatio || 1;
+                        canvas.width = Math.round(cssW * dpr);
+                        canvas.height = Math.round(cssH * dpr);
+                        canvas.style.width = cssW + 'px';
+                        canvas.style.height = cssH + 'px';
+                        const ctx = canvas.getContext('2d');
+                        try { ctx.setTransform(1,0,0,1,0,0); ctx.scale(dpr, dpr); } catch(e) {}
+                        try { ctx.clearRect(0,0,cssW,cssH); } catch(e) {}
+                        try {
+                            ctx.fillStyle = 'rgba(245,245,245,0.6)';
+                            ctx.fillRect(0,0,cssW,cssH);
+                            ctx.fillStyle = 'rgba(55,65,81,0.7)';
+                            ctx.font = '14px sans-serif';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(msg, cssW/2, cssH/2);
+                        } catch(e) { /* ignore drawing errors */ }
+                    });
+                    // Hide RSI panel when showing placeholder
+                    try { if (rc && rc.parentElement) rc.parentElement.style.display = 'none'; } catch(e){}
+                } catch (e) { console.warn('showModalPlaceholder failed', e); }
+            }
+
             const renderFromCacheOrNotify = (opts) => {
                 try {
                     const tf = opts.timeframe || document.getElementById('modalTimeframeSelect')?.value || '15mins';
@@ -2570,36 +2700,148 @@
                     if (cd) {
                         renderCombinedChart(cd, symbol, opts);
                     } else {
-                        // Do not fetch automatically; inform user to click Reload to fetch server data
+                        // No cached data: show placeholder and instruct user to Reload (or switch timeframe to fetch)
+                        showModalPlaceholder('No data available. Click Reload to fetch.');
                         try { toastr.info('No cached data for selected timeframe. Click Reload to fetch from server.', 'Chart'); } catch(e){}
                     }
                 } catch (e) { console.warn('renderFromCacheOrNotify failed', e); }
             };
 
-            const loadAndCache = async () => {
-                const enableEMA = document.getElementById('modalEnableEMA')?.checked ?? true;
-                const enableDMA = document.getElementById('modalEnableDMA')?.checked ?? true;
-                const tf = document.getElementById('modalTimeframeSelect')?.value || document.getElementById('timeframeSelect')?.value || '15mins';
-                await loadSymbolChart(symbol, { enableEMA, enableDMA, timeframe: tf, forceRun: true });
-            };
+            // Helper: find the symbol object from the loaded symbols list
+            function getSymbolObj(sym) {
+                try {
+                    if (!symbols || symbols.length === 0) return null;
+                    return symbols.find(s => (s && (s.Symbol === sym || s === sym)) );
+                } catch (e) { return null; }
+            }
+
+            // Fetch existing chart-data from server (read-only GETs). This will NOT run scanners.
+            async function fetchExistingChartData(sym, opts) {
+                try {
+                    const enableEMA = opts.enableEMA ?? true;
+                    const enableDMA = opts.enableDMA ?? true;
+                    const tf = opts.timeframe || '15mins';
+                    // Check availability flags on symbol object. If not available, do not attempt network run.
+                    const symObj = getSymbolObj(sym);
+                    const hasFlag = symObj && (symObj.OHLC_Available || symObj.RSI_Available || symObj.EMA_Available || symObj.DMA_Available);
+                    if (!hasFlag) {
+                        // If no explicit flags, do not fetch — respect "only run on main page" policy
+                        showModalPlaceholder('No data available. Please run scanners from main page.');
+                        try { toastr.info('Data not available for this symbol. Use Run buttons on main page to generate data.', 'Chart'); } catch(e){}
+                        return null;
+                    }
+
+                    // Show generating placeholder while fetching read-only data
+                    showModalPlaceholder('Generating chart...');
+
+                    const q = `?timeframe=${encodeURIComponent(tf)}`;
+                    let combined = { labels: null, datasets: [] };
+                    const seenLabels = new Set();
+
+                    // Fetch OHLC resampled for timeframe (read-only)
+                    try {
+                        const ohlcRes = await fetch(`/api/chart-data/ohlc/${encodeURIComponent(sym)}${q}`, { cache: 'no-store' }).catch(() => null);
+                        if (ohlcRes && ohlcRes.ok) {
+                            const ohlcPayload = await ohlcRes.json().catch(() => null);
+                            if (ohlcPayload && ohlcPayload.chartData) {
+                                const part = ohlcPayload.chartData;
+                                if (Array.isArray(part.labels)) combined.labels = part.labels.slice();
+                                if (Array.isArray(part.datasets)) {
+                                    for (const ds of part.datasets) {
+                                        const label = (ds && ds.label) ? ds.label : JSON.stringify(ds);
+                                        if (seenLabels.has(label)) continue;
+                                        seenLabels.add(label);
+                                        const copy = Object.assign({}, ds);
+                                        if (Array.isArray(ds.data)) copy.data = ds.data.slice();
+                                        combined.datasets.push(copy);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    // Fetch indicator datasets read-only (do NOT request server runs). Single attempt per scanner.
+                    const scanners = ['rsi','ema','dma'];
+                    for (const s of scanners) {
+                        try {
+                            const res = await fetch(`/api/chart-data/${s}/${encodeURIComponent(sym)}`, { cache: 'no-store' }).catch(() => null);
+                            if (!res || !res.ok) continue;
+                            const payload = await res.json().catch(() => null);
+                            if (!payload || !payload.chartData) continue;
+                            const part = payload.chartData;
+                            if (!combined.labels && Array.isArray(part.labels)) combined.labels = part.labels.slice();
+                            if (Array.isArray(part.datasets)) {
+                                for (const ds of part.datasets) {
+                                    const label = (ds && ds.label) ? ds.label : JSON.stringify(ds);
+                                    if (seenLabels.has(label)) continue;
+                                    seenLabels.add(label);
+                                    const copy = Object.assign({}, ds);
+                                    if (Array.isArray(ds.data)) copy.data = ds.data.slice();
+                                    combined.datasets.push(copy);
+                                }
+                            }
+                        } catch (e) { /* ignore */ }
+                    }
+
+                    // If we have nothing, show placeholder and return
+                    if ((!combined.labels || combined.labels.length === 0) && (!combined.datasets || combined.datasets.length === 0)) {
+                        showModalPlaceholder('No data available. Please run scanners from main page.');
+                        try { toastr.warning('No existing chart data found on server for this symbol/timeframe.', 'No Data'); } catch(e){}
+                        return null;
+                    }
+
+                    // Cache and render
+                    const cd = { labels: combined.labels ? combined.labels.slice() : [], datasets: combined.datasets.slice() };
+                    try { chartCache[`${sym}::${tf}`] = cd; } catch(e){}
+                    try { renderCombinedChart(cd, sym, { enableEMA, enableDMA, timeframe: tf }); } catch(e){ console.warn('render after fetch failed', e); }
+                    return cd;
+                } catch (e) { console.warn('fetchExistingChartData failed', e); showModalPlaceholder('No data available. Please run scanners from main page.'); return null; }
+            }
 
             // Wire checkbox toggles to re-render locally from cache (no API calls)
             const emaCb = document.getElementById('modalEnableEMA'); if (emaCb) emaCb.onchange = () => renderFromCacheOrNotify({ enableEMA: emaCb.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: document.getElementById('modalTimeframeSelect')?.value });
             const dmaCb = document.getElementById('modalEnableDMA'); if (dmaCb) dmaCb.onchange = () => renderFromCacheOrNotify({ enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: dmaCb.checked, timeframe: document.getElementById('modalTimeframeSelect')?.value });
-            // Reload button explicitly fetches from server
-            const reload = document.getElementById('reloadChartBtn'); if (reload) reload.onclick = loadAndCache;
-            // Wire timeframe dropdown to update chart from cache only (debounced)
+            // Reload button explicitly fetches existing server chart-data (read-only). Do NOT run scanners.
+            const reload = document.getElementById('reloadChartBtn');
+            if (reload) reload.onclick = () => {
+                try {
+                    const enableEMA = document.getElementById('modalEnableEMA')?.checked ?? true;
+                    const enableDMA = document.getElementById('modalEnableDMA')?.checked ?? true;
+                    const tf = document.getElementById('modalTimeframeSelect')?.value || document.getElementById('timeframeSelect')?.value || '15mins';
+                    fetchExistingChartData(symbol, { enableEMA, enableDMA, timeframe: tf }).catch(() => {});
+                } catch(e) { console.warn('Reload handler failed', e); }
+            };
+            // Wire timeframe dropdown: re-render only from cache. Do NOT trigger server runs or fetches on timeframe change.
             const tfSelect = document.getElementById('modalTimeframeSelect');
             if (tfSelect) {
-                const debouncedLocalRender = debounce(() => {
-                    renderFromCacheOrNotify({ enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: tfSelect.value });
+                const onTfChange = debounce(() => {
+                    try {
+                        const tf = tfSelect.value;
+                        const key = `${symbol}::${tf}`;
+                        if (chartCache[key]) {
+                            renderCombinedChart(chartCache[key], symbol, { enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: tf });
+                        } else {
+                            // If no cache, fetch existing read-only chart-data for the new timeframe (user-initiated)
+                            fetchExistingChartData(symbol, { enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: tf }).catch(() => {
+                                showModalPlaceholder('No data available. Please run scanners from main page.');
+                            });
+                        }
+                    } catch(e) { console.warn('Timeframe change handler failed', e); }
                 }, 250);
-                tfSelect.addEventListener('change', () => {
-                    try { debouncedLocalRender(); } catch(e) { console.warn('Timeframe change handler failed', e); }
-                });
+                tfSelect.addEventListener('change', onTfChange);
             }
-            // Initial load: fetch and cache (user can then toggle controls without network)
-            loadAndCache();
+            // Initial render: prefer cache; if no cache but server flags indicate data exists, do a one-time read-only fetch to render.
+            const initialTf = document.getElementById('modalTimeframeSelect')?.value || '15mins';
+            const initialKey = `${symbol}::${initialTf}`;
+            const symObj = getSymbolObj(symbol);
+            if (chartCache[initialKey]) {
+                renderCombinedChart(chartCache[initialKey], symbol, { enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: initialTf });
+            } else if (symObj && (symObj.OHLC_Available || symObj.RSI_Available || symObj.EMA_Available || symObj.DMA_Available)) {
+                // If server indicates data available, perform a single read-only fetch to render chart
+                fetchExistingChartData(symbol, { enableEMA: document.getElementById('modalEnableEMA')?.checked, enableDMA: document.getElementById('modalEnableDMA')?.checked, timeframe: initialTf });
+            } else {
+                showModalPlaceholder('No data available. Please run scanners from main page.');
+            }
         }
     async function runScannersForSymbolTimeframe(symbol, timeframe, scanners = ['rsi','ema','dma']) {
         // Run scanners sequentially for the requested timeframe so server computes indicators at the desired granularity
@@ -3100,6 +3342,64 @@
 
                 // Prepare price/top datasets and detect OHLC
                 const allDatasets = datasets;
+                // Make local copy of labels/datasets so we can trim start-of-day for certain intraday TFs
+                let localLabels = Array.isArray(cd.labels) ? cd.labels.slice() : [];
+                const localDatasets = (allDatasets || []).map(ds => ({ label: ds.label, data: Array.isArray(ds.data) ? ds.data.slice() : ds.data, type: ds.type }));
+                // Determine timeframe minutes
+                const tfStr = (options && options.timeframe) ? options.timeframe : (document.getElementById('modalTimeframeSelect')?.value || '15mins');
+                const tfMin = (function(tf){ try { const m = tf.match(/(\d+)/); if (!m) return (tf === '1hour' || tf === '60mins') ? 60 : 15; return parseInt(m[1],10); } catch(e){ return 15; } })(tfStr);
+                // For 30min+ intraday charts, trim labels/datasets to start at 09:15 or first available label for the day
+                if (tfMin >= 30 && Array.isArray(localLabels) && localLabels.length > 0) {
+                    try {
+                        // Prefer trimming by detecting first label that contains '09:15' (handles ISO timestamps with timezone)
+                        let startIdx = -1;
+                        try {
+                            if (Array.isArray(localLabels)) {
+                                startIdx = localLabels.findIndex(l => (typeof l === 'string') && l.indexOf('09:15') !== -1);
+                            }
+                        } catch(e) { startIdx = -1; }
+                        if (startIdx === -1) {
+                            // Fallback: detect first OHLC candle that has non-null values
+                        try {
+                            const ohlcDs = localDatasets.find(d => d.label && d.label.toUpperCase() === 'OHLC');
+                            if (ohlcDs && Array.isArray(ohlcDs.data)) {
+                                for (let i = 0; i < ohlcDs.data.length; i++) {
+                                    const pt = ohlcDs.data[i];
+                                    // pt may be array [o,h,l,c] or object {o,h,l,c}
+                                    let o = null, h = null, l = null, c = null;
+                                    if (Array.isArray(pt)) { o = pt[0]; h = pt[1]; l = pt[2]; c = pt[3]; }
+                                    else if (pt && typeof pt === 'object') { o = pt.o ?? pt[0] ?? null; h = pt.h ?? pt[1] ?? null; l = pt.l ?? pt[2] ?? null; c = pt.c ?? pt[3] ?? null; }
+                                        if ((o !== null && o !== undefined) || (c !== null && c !== undefined)) {
+                                        // candidate - now ensure label time >= 09:15 if possible
+                                        const lab = localLabels[i];
+                                        let d = null;
+                                        if (typeof lab === 'number') d = new Date(lab < 1e12 ? lab*1000 : lab);
+                                        else d = new Date(lab);
+                                        if (!isNaN(d && d.getTime && d.getTime())) {
+                                            const h = d.getHours(); const min = d.getMinutes();
+                                            if (h > 9 || (h === 9 && min >= 15)) { startIdx = i; break; }
+                                        } else {
+                                            startIdx = i; break;
+                                        }
+                                    }
+                                }
+                            }
+                            } catch(e) { /* ignore */ }
+                        }
+                        if (startIdx > 0) {
+                            localLabels = localLabels.slice(startIdx);
+                            for (const ds of localDatasets) {
+                                if (Array.isArray(ds.data)) ds.data = ds.data.slice(startIdx);
+                                // If dataset contains objects with numeric x, reindex x to 0..n-1
+                                if (Array.isArray(ds.data) && ds.data.length > 0 && typeof ds.data[0] === 'object' && ds.data[0].hasOwnProperty('x')) {
+                                    ds.data = ds.data.map((pt, idx) => { try { const copy = Object.assign({}, pt); copy.x = idx; return copy; } catch(e){ return pt; } });
+                                }
+                            }
+                            // Replace cd.labels and cd.datasets with trimmed copies for rendering
+                            cd = { labels: localLabels.slice(), datasets: localDatasets.map(d => (Object.assign({}, d))) };
+                        }
+                    } catch(e) { /* ignore trimming errors */ }
+                }
                 const ohlc = allDatasets.find(d => d.label && d.label.toUpperCase() === 'OHLC');
                 const priceDatasets = [];
                 const candlestickAvailable = (typeof Chart !== 'undefined' && Chart.registry && !!Chart.registry.getController('candlestick'));
