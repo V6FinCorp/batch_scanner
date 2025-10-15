@@ -1696,18 +1696,44 @@
                 const needsRsi = requiredRsi.some(k => !has(k));
                 const needsEma = requiredEma.some(k => !has(k));
                 const needsDma = requiredDma.some(k => !has(k));
-                if (needsRsi || needsEma || needsDma) {
+
+                // Helper to check availability flags returned by /api/symbol-table
+                const isAvailableFlag = (scanner) => {
+                    try {
+                        const flagKey = scanner.toUpperCase() + '_Available';
+                        if (symbolObj && Object.prototype.hasOwnProperty.call(symbolObj, flagKey)) {
+                            return !!symbolObj[flagKey];
+                        }
+                        // Fallback: if availability flag missing, consider data available only if any expected data key exists
+                        const keys = (scanner === 'rsi') ? requiredRsi : (scanner === 'ema') ? requiredEma : requiredDma;
+                        return keys.some(k => has(k));
+                    } catch (e) {
+                        return false;
+                    }
+                };
+
+                const shouldFetchRsi = needsRsi && isAvailableFlag('rsi');
+                const shouldFetchEma = needsEma && isAvailableFlag('ema');
+                const shouldFetchDma = needsDma && isAvailableFlag('dma');
+
+                if (shouldFetchRsi || shouldFetchEma || shouldFetchDma) {
                     // small stagger to avoid bursting requests on large symbol lists
                     setTimeout(() => {
                         try {
-                            if (needsRsi) refreshRow(rowId, 'rsi');
-                            if (needsEma) refreshRow(rowId, 'ema');
-                            if (needsDma) refreshRow(rowId, 'dma');
+                            if (shouldFetchRsi) refreshRow(rowId, 'rsi');
+                            if (shouldFetchEma) refreshRow(rowId, 'ema');
+                            if (shouldFetchDma) refreshRow(rowId, 'dma');
                         } catch(e) { /* ignore */ }
                     }, 200);
-                            // Register mini canvas for lazy loading (IntersectionObserver)
-                            try { observeMiniCanvas(s); } catch(e) { /* ignore */ }
                 }
+
+                // Register mini canvas for lazy loading only if some data (OHLC/RSI/EMA/DMA) is available
+                try {
+                    const hasAnyAvailable = ['OHLC_Available','RSI_Available','EMA_Available','DMA_Available'].some(k => symbolObj && symbolObj[k]);
+                    if (hasAnyAvailable) {
+                        try { observeMiniCanvas(s); } catch(e) { /* ignore */ }
+                    }
+                } catch(e) { /* ignore */ }
             })(symbolData, s);
 
             return tr;
