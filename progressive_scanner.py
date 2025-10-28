@@ -75,6 +75,9 @@ class ProgressiveScanner:
                             key = f'ema_{p}'
                             if key in ema_row and ema_row[key] is not None:
                                 symbol_info[key] = ema_row[key]
+                        crossover_val = ema_row.get('ema_15_crossover')
+                        if crossover_val is not None:
+                            symbol_info['ema_15_crossover'] = crossover_val
                 except Exception:
                     pass
 

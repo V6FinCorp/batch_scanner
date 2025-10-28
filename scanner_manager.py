@@ -360,6 +360,8 @@ class ScannerManager:
                                         for p in base_config.get('ema_periods', []):
                                             allowed_cols.add(f'ema_{p}')
                                             allowed_cols.add(f'EMA{p}')
+                                        if 15 in base_config.get('ema_periods', []):
+                                            allowed_cols.add('ema_15_crossover')
                                     elif scanner_type == 'dma':
                                         for p in base_config.get('dma_periods', []):
                                             allowed_cols.add(f'dma_{p}')

@@ -169,6 +169,10 @@
     .popup-icon { margin-left:6px; cursor:pointer; color:var(--text-secondary); }
     .action-popup .last-update { display:block; font-size:0.75rem; color:var(--text-muted); margin-top:6px; }
     .action-popup .last-update span { display:block; }
+    /* Compact EMA detail popup */
+    .ema-popup { position:absolute; z-index:2001; background:var(--bg-primary); border:1px solid var(--border-color); padding:6px 8px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.12); font-size:0.85rem; white-space:nowrap; }
+    .ema-popup .line { display:block; margin:2px 0; }
+    .ema-popup .muted { color: var(--text-muted); }
     </style>
 </head>
 <body>
@@ -254,6 +258,16 @@
                     <div style="display:flex; align-items:center; gap:0.6rem;">
                         <label for="togglePct" style="margin:0; font-size:0.9rem; color:var(--text-secondary);">EMA/DMA as %</label>
                         <input type="checkbox" id="togglePct" />
+                    </div>
+                    <span style="opacity:0.6">|</span>
+                    <div id="emaLongSwitcher" style="display:flex; align-items:center; gap:0.5rem;">
+                        <label style="margin:0; font-size:0.9rem; color:var(--text-secondary);">Long EMA:</label>
+                        <label style="display:flex; align-items:center; gap:0.25rem;">
+                            <input type="radio" name="emaLong" id="emaLong15" value="15"> EMA-15
+                        </label>
+                        <label style="display:flex; align-items:center; gap:0.25rem;">
+                            <input type="radio" name="emaLong" id="emaLong21" value="21"> EMA-21
+                        </label>
                     </div>
                     <span style="opacity:0.6">|</span>
                     <div style="display:flex; align-items:center; gap:0.5rem;">
@@ -523,6 +537,12 @@
         // Build table header dynamically using configured periods from server
         async function buildDynamicHeader() {
             try {
+                // Ensure long EMA selection is available
+                const LONG_EMA_STORAGE_KEY = 'ui.longEmaPeriod';
+                if (typeof window.longEmaPeriod === 'undefined') {
+                    const saved = parseInt(localStorage.getItem(LONG_EMA_STORAGE_KEY) || '15', 10);
+                    window.longEmaPeriod = (saved === 21) ? 21 : 15;
+                }
                 // Attempt to fetch config for RSI/EMA/DMA; fall back to sensible defaults
                 const rsiRes = await fetch('/api/config/rsi');
                 const emaRes = await fetch('/api/config/ema');
@@ -561,10 +581,14 @@
                     const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `RSI-${p}`; tr.appendChild(th); colIndexMap[key] = idx++;
                 }
 
-                // EMA columns
-                for (const p of ema_periods) {
-                    const key = `ema_${p}`;
-                    const th = document.createElement('th'); th.setAttribute('data-key', key); th.textContent = `EMA-${p}`; tr.appendChild(th); colIndexMap[key] = idx++;
+                // EMA columns: remove EMA-9 and EMA-15/21 value columns; keep only crossover as dynamic "EMA-15-X" or "EMA-21-X"
+                {
+                    const crossKey = 'ema_15_crossover';
+                    const crossTh = document.createElement('th');
+                    crossTh.setAttribute('data-key', crossKey);
+                    crossTh.textContent = `EMA-${window.longEmaPeriod}-X`;
+                    tr.appendChild(crossTh);
+                    colIndexMap[crossKey] = idx++;
                 }
 
                 // DMA columns
@@ -577,6 +601,15 @@
                 const thActions = document.createElement('th'); thActions.textContent = 'Sync'; tr.appendChild(thActions); colIndexMap['Sync'] = idx++;
 
                 thead.appendChild(tr);
+                // Sync the radio UI to current selection
+                try {
+                    const r15 = document.getElementById('emaLong15');
+                    const r21 = document.getElementById('emaLong21');
+                    if (r15 && r21) {
+                        r15.checked = window.longEmaPeriod === 15;
+                        r21.checked = window.longEmaPeriod === 21;
+                    }
+                } catch (e) { /* ignore */ }
 
             } catch (e) {
                 console.warn('Failed to build dynamic header, falling back to static header', e);
@@ -593,6 +626,36 @@
             const topTf = document.getElementById('timeframeSelect');
             if (topTf) topTf.addEventListener('change', debounce(() => { refreshAllMiniSparks(); computeHeaderOffset(); updateAllEmaForTimeframe(); }, 400));
         } catch (e) { /* ignore */ }
+
+        // Long EMA switcher (radio) wiring
+        (function initLongEmaSwitcher(){
+            try {
+                const LONG_EMA_STORAGE_KEY = 'ui.longEmaPeriod';
+                if (typeof window.longEmaPeriod === 'undefined') {
+                    const saved = parseInt(localStorage.getItem(LONG_EMA_STORAGE_KEY) || '15', 10);
+                    window.longEmaPeriod = (saved === 21) ? 21 : 15;
+                }
+                const r15 = document.getElementById('emaLong15');
+                const r21 = document.getElementById('emaLong21');
+                const apply = (val) => {
+                    const v = (parseInt(val, 10) === 21) ? 21 : 15;
+                    if (window.longEmaPeriod === v) return;
+                    window.longEmaPeriod = v;
+                    localStorage.setItem(LONG_EMA_STORAGE_KEY, String(v));
+                    // Update header labels in-place if already built
+                    try {
+                        const thCross = document.querySelector('th[data-key="ema_15_crossover"]');
+                        if (thCross) thCross.textContent = `EMA-${v}-X`;
+                    } catch(e){ /* ignore */ }
+                    // Recompute EMA values for all rows for current timeframe
+                    try { updateAllEmaForTimeframe(); } catch(e){ /* ignore */ }
+                };
+                if (r15) r15.addEventListener('change', (e)=>{ if (e.target && e.target.checked) apply('15'); });
+                if (r21) r21.addEventListener('change', (e)=>{ if (e.target && e.target.checked) apply('21'); });
+                // Initialize checked state
+                if (r15 && r21) { r15.checked = window.longEmaPeriod === 15; r21.checked = window.longEmaPeriod === 21; }
+            } catch (e) { /* ignore */ }
+        })();
 
         // Load symbols from API
         async function loadSymbols() {
@@ -638,6 +701,8 @@
                 renderSymbolsTable();
                 updateSymbolStats();
                 updateStatusBar('Symbols loaded successfully');
+                // Compute EMA values for current timeframe once on initial load to ensure EMA popup has data
+                try { await updateAllEmaForTimeframe(); } catch(e) { /* ignore */ }
                 
             } catch (error) {
                 console.error('Failed to load symbols:', error);
@@ -980,9 +1045,10 @@
                 }
                 if (!closes || closes.length === 0) return false;
                 const ema9Arr = computeEMAArray(closes, 9);
-                const ema15Arr = computeEMAArray(closes, 15);
+                const chosenLong = (typeof window.longEmaPeriod !== 'undefined' && window.longEmaPeriod === 21) ? 21 : 15;
+                const emaLongArr = computeEMAArray(closes, chosenLong);
                 const ema9 = ema9Arr ? ema9Arr[ema9Arr.length-1] : null;
-                const ema15 = ema15Arr ? ema15Arr[ema15Arr.length-1] : null;
+                const emaLong = emaLongArr ? emaLongArr[emaLongArr.length-1] : null;
 
                 const row = document.getElementById(`row-${symbol}`);
                 if (!row) return false;
@@ -1006,9 +1072,9 @@
 
                 // Decide color based on ema9 vs ema15
                 let cls9 = 'percent-neutral', cls15 = 'percent-neutral';
-                if (!isNaN(ema9) && !isNaN(ema15)) {
-                    if (ema9 > ema15) { cls9 = cls15 = 'percent-pos'; }
-                    else if (ema9 < ema15) { cls9 = cls15 = 'percent-neg'; }
+                if (!isNaN(ema9) && !isNaN(emaLong)) {
+                    if (ema9 > emaLong) { cls9 = cls15 = 'percent-pos'; }
+                    else if (ema9 < emaLong) { cls9 = cls15 = 'percent-neg'; }
                     else { cls9 = cls15 = 'percent-neutral'; }
                 }
 
@@ -1017,7 +1083,31 @@
                     cells[idx9].innerHTML = showPctDiff ? formatPct(ema9) : `<span class="${cls9}">${formatVal(ema9)}</span>`;
                 }
                 if (idx15 !== undefined && cells[idx15]) {
-                    cells[idx15].innerHTML = showPctDiff ? formatPct(ema15) : `<span class="${cls15}">${formatVal(ema15)}</span>`;
+                    cells[idx15].innerHTML = showPctDiff ? formatPct(emaLong) : `<span class="${cls15}">${formatVal(emaLong)}</span>`;
+                }
+
+                const idxCross = colIndexMap['ema_15_crossover'];
+                if (idxCross !== undefined && cells[idxCross]) {
+                    const cell = cells[idxCross];
+                    cell.removeAttribute('data-original');
+                    cell.removeAttribute('data-pct');
+                    cell.classList.add('ema-x-cell');
+                    cell.style.cursor = 'pointer';
+                    let gapValue = NaN;
+                    if (!isNaN(ema9) && !isNaN(emaLong) && Math.abs(emaLong) > 1e-6) {
+                        gapValue = ((ema9 - emaLong) / emaLong) * 100;
+                    }
+                    const formattedGap = formatEmaGapDisplay(gapValue);
+                    cell.innerHTML = formattedGap.html;
+                    if (formattedGap.value !== null) {
+                        cell.setAttribute('data-original', String(formattedGap.value));
+                        cell.setAttribute('data-pct', String(formattedGap.value));
+                    }
+                    // Store details for popup
+                    if (!isNaN(ema9)) cell.setAttribute('data-ema9', ema9.toFixed(2)); else cell.removeAttribute('data-ema9');
+                    if (!isNaN(emaLong)) cell.setAttribute('data-emalong', emaLong.toFixed(2)); else cell.removeAttribute('data-emalong');
+                    if (!isNaN(cmp)) cell.setAttribute('data-cmp', cmp.toFixed(2)); else cell.removeAttribute('data-cmp');
+                    try { cell.setAttribute('data-long', String(window.longEmaPeriod || 15)); } catch(e) { /* ignore */ }
                 }
 
                 // Mark reco as pending for this row since EMA values changed; schedule recompute
@@ -1079,6 +1169,16 @@
                 // Determine presence of indicators in the row (must have at least one RSI, one EMA and one DMA)
                 const hasIndicator = (prefix) => {
                     try {
+                        if (prefix === 'ema_') {
+                            // Treat EMA availability based on EMA-X cell having computed ema9 and emalong
+                            const idxCross = colIndexMap['ema_15_crossover'];
+                            if (idxCross === undefined) return false;
+                            const c = row.querySelectorAll('td')[idxCross];
+                            if (!c) return false;
+                            const e9 = parseFloat(c.getAttribute('data-ema9'));
+                            const el = parseFloat(c.getAttribute('data-emalong'));
+                            return !isNaN(e9) && !isNaN(el);
+                        }
                         const cols = Object.keys(colIndexMap || {}).filter(k => k.startsWith(prefix));
                         if (!cols || cols.length === 0) return false;
                         for (const k of cols) {
@@ -1178,6 +1278,33 @@
             } catch (e) { return NaN; }
         }
 
+        // Helper: format EMA9 vs EMA15 percent gap as colored text and return numeric value
+        function formatEmaGapDisplay(raw) {
+            let num = NaN;
+            if (raw === null || raw === undefined || raw === '') {
+                num = NaN;
+            } else if (typeof raw === 'number') {
+                num = raw;
+            } else {
+                const cleaned = String(raw).replace('%', '').replace(/[^0-9.\-]/g, '').trim();
+                if (cleaned !== '') {
+                    num = Number(cleaned);
+                }
+            }
+            if (!Number.isFinite(num)) {
+                return { html: '<span class="cell-muted">-</span>', value: null };
+            }
+            const rounded = Number(num.toFixed(2));
+            const normalized = Math.abs(rounded) < 0.005 ? 0 : rounded;
+            let cls = 'percent-neutral';
+            if (normalized > 0) cls = 'percent-pos';
+            else if (normalized < 0) cls = 'percent-neg';
+            return {
+                html: `<span class="${cls}">${normalized.toFixed(2)}%</span>`,
+                value: normalized
+            };
+        }
+
         // Helper: attempt to extract a Date object from scanner payload/result
         function extractTimestampFromResult(obj) {
             try {
@@ -1239,7 +1366,14 @@
             try {
                 const tbody = document.getElementById('symbolsTBody');
                 if (!tbody) return;
-                const emaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('ema_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+                const emaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('ema_') && k !== 'ema_15_crossover').sort((a,b)=>{
+                    const aNum = parseInt(a.split('_')[1], 10);
+                    const bNum = parseInt(b.split('_')[1], 10);
+                    if (isNaN(aNum) && isNaN(bNum)) return a.localeCompare(b);
+                    if (isNaN(aNum)) return 1;
+                    if (isNaN(bNum)) return -1;
+                    return aNum - bNum;
+                });
                 const dmaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
 
                 // For each row, update EMA/DMA cells only
@@ -1388,16 +1522,40 @@
                     // dynamic rsi index fallback: prefer column map if available
                     const rsiIdx = (colIndexMap && colIndexMap[rsiKey] !== undefined) ? colIndexMap[rsiKey] : 3;
                     rsi_tf = readIndicator(rsiIdx);
-                    ema9 = readIndicator(colIndexMap['ema_9'] !== undefined ? colIndexMap['ema_9'] : 6);
-                    ema15 = readIndicator(colIndexMap['ema_15'] !== undefined ? colIndexMap['ema_15'] : 7);
+                    // EMA values are stored on EMA-X cell as data attributes
+                    try {
+                        const idxCross = colIndexMap['ema_15_crossover'];
+                        if (idxCross !== undefined) {
+                            const c = cells[idxCross];
+                            const e9 = parseFloat(c.getAttribute('data-ema9'));
+                            const el = parseFloat(c.getAttribute('data-emalong'));
+                            if (!isNaN(e9)) ema9 = e9;
+                            if (!isNaN(el)) ema15 = el; // 'ema15' here represents the selected long EMA
+                        }
+                    } catch(e) { /* ignore */ }
                     ema65 = readIndicator(colIndexMap['ema_65'] !== undefined ? colIndexMap['ema_65'] : 8);
                     ema200 = readIndicator(colIndexMap['ema_200'] !== undefined ? colIndexMap['ema_200'] : 9);
                 }
             } else {
                 // object from API
                 cmp = safeNum(symbolData.CMP || symbolData.cmp || symbolData['CMP']);
-                ema9 = safeNum(symbolData.ema_9);
-                ema15 = safeNum(symbolData.ema_15);
+                // Prefer DOM EMA-X attributes for ema9/long if available on row
+                try {
+                    const row = document.getElementById(`row-${symbolData.Symbol || symbolData.symbol}`);
+                    if (row) {
+                        const cells = row.querySelectorAll('td');
+                        const idxCross = colIndexMap['ema_15_crossover'];
+                        if (idxCross !== undefined) {
+                            const c = cells[idxCross];
+                            const e9 = parseFloat(c.getAttribute('data-ema9'));
+                            const el = parseFloat(c.getAttribute('data-emalong'));
+                            if (!isNaN(e9)) ema9 = e9;
+                            if (!isNaN(el)) ema15 = el;
+                        }
+                    }
+                } catch(e) { /* ignore */ }
+                if (ema9 === null) ema9 = safeNum(symbolData.ema_9);
+                if (ema15 === null) ema15 = safeNum(symbolData.ema_15);
                 ema65 = safeNum(symbolData.ema_65) || safeNum(symbolData.ema_21) || null;
                 ema200 = safeNum(symbolData.ema_200) || safeNum(symbolData.dma_200) || null;
                 // timeframe-specific RSI key lookup
@@ -1422,8 +1580,16 @@
                         };
                         const rsiIdx = (colIndexMap && colIndexMap[rsiKey] !== undefined) ? colIndexMap[rsiKey] : 3;
                         rsi_tf = rsi_tf || readIndicator(rsiIdx);
-                        ema9 = ema9 || readIndicator(colIndexMap['ema_9'] !== undefined ? colIndexMap['ema_9'] : 6);
-                        ema15 = ema15 || readIndicator(colIndexMap['ema_15'] !== undefined ? colIndexMap['ema_15'] : 7);
+                        try {
+                            const idxCross = colIndexMap['ema_15_crossover'];
+                            if ((ema9 === null || ema15 === null) && idxCross !== undefined) {
+                                const c = cells[idxCross];
+                                const e9 = parseFloat(c.getAttribute('data-ema9'));
+                                const el = parseFloat(c.getAttribute('data-emalong'));
+                                if (ema9 === null && !isNaN(e9)) ema9 = e9;
+                                if (ema15 === null && !isNaN(el)) ema15 = el;
+                            }
+                        } catch(e) { /* ignore */ }
                         ema65 = ema65 || readIndicator(colIndexMap['ema_65'] !== undefined ? colIndexMap['ema_65'] : 8);
                         ema200 = ema200 || readIndicator(colIndexMap['ema_200'] !== undefined ? colIndexMap['ema_200'] : 9);
                     }
@@ -1431,7 +1597,7 @@
             }
 
             let score = 0;
-            // EMA crossover on selected timeframe (ema_9 vs ema_15)
+            // EMA crossover on selected timeframe (ema_9 vs selected long EMA)
             // Small deadband: if difference is tiny (< deadband) treat as equal to avoid flip-flopping
             const emaDeadband = 0.5; // price units; tweak if needed
             if (ema9 !== null && ema15 !== null) {
@@ -1545,14 +1711,38 @@
                         const read = (idx) => parseNumericFromCell(cells[idx], parseFloat(cells[1]?.getAttribute('data-cmp')||NaN));
                         cmp = read(colIndexMap['CMP'] || 1);
                         rsi_tf = read(colIndexMap[rsiKey] !== undefined ? colIndexMap[rsiKey] : 3);
-                        ema9 = read(colIndexMap['ema_9'] !== undefined ? colIndexMap['ema_9'] : 6);
-                        ema15 = read(colIndexMap['ema_15'] !== undefined ? colIndexMap['ema_15'] : 7);
+                        // Read EMA from EMA-X cell attributes
+                        try {
+                            const idxCross = colIndexMap['ema_15_crossover'];
+                            if (idxCross !== undefined) {
+                                const c = cells[idxCross];
+                                const e9 = parseFloat(c.getAttribute('data-ema9'));
+                                const el = parseFloat(c.getAttribute('data-emalong'));
+                                if (!isNaN(e9)) ema9 = e9;
+                                if (!isNaN(el)) ema15 = el;
+                            }
+                        } catch(e) { /* ignore */ }
                         ema65 = read(colIndexMap['ema_65'] !== undefined ? colIndexMap['ema_65'] : 8);
                         ema200 = read(colIndexMap['ema_200'] !== undefined ? colIndexMap['ema_200'] : 9);
                     } else if (symbolData && typeof symbolData === 'object') {
                         cmp = parseFloat(symbolData.CMP || symbolData.cmp || symbolData['CMP']);
-                        ema9 = parseFloat(symbolData.ema_9);
-                        ema15 = parseFloat(symbolData.ema_15);
+                        // Prefer EMA from DOM attributes if present
+                        try {
+                            const row = document.getElementById(`row-${symbolData.Symbol || symbolData.symbol}`);
+                            if (row) {
+                                const cells = row.querySelectorAll('td');
+                                const idxCross = colIndexMap['ema_15_crossover'];
+                                if (idxCross !== undefined) {
+                                    const c = cells[idxCross];
+                                    const e9 = parseFloat(c.getAttribute('data-ema9'));
+                                    const el = parseFloat(c.getAttribute('data-emalong'));
+                                    if (!isNaN(e9)) ema9 = e9;
+                                    if (!isNaN(el)) ema15 = el;
+                                }
+                            }
+                        } catch(e) { /* ignore */ }
+                        if (ema9 === null) ema9 = parseFloat(symbolData.ema_9);
+                        if (ema15 === null) ema15 = parseFloat(symbolData.ema_15);
                         ema65 = parseFloat(symbolData.ema_65) || parseFloat(symbolData.ema_21);
                         ema200 = parseFloat(symbolData.ema_200) || parseFloat(symbolData.dma_200);
                         rsi_tf = parseFloat(symbolData[rsiKey]);
@@ -1614,39 +1804,40 @@
             const getCellVal = (key) => symbolData[key] ?? '';
             const td = (html, cls='') => { const c = document.createElement('td'); if (cls) c.className = cls; c.innerHTML = html; return c; };
             const fmtNum = (v) => (v === null || v === undefined || v === '') ? '<span class="cell-muted">-</span>' : Number(v).toFixed(2);
+            const toNum = (v) => {
+                if (v === null || v === undefined) return NaN;
+                if (typeof v === 'number') return v;
+                const s = String(v).replace('%','').replace(/[^0-9\.\-]/g, '');
+                const n = parseFloat(s);
+                return isNaN(n) ? NaN : n;
+            };
             const colorRsiHtml = (v) => {
                 if (v===null || v===undefined || v==='') return '<span class="cell-muted">-</span>';
                 const n = Number(v); if (isNaN(n)) return '<span class="cell-muted">-</span>';
-                // Per user: Red when >=70, Green when <=30, otherwise Grey
                 if (n >= 70) return `<span class="rsi-neg">${n.toFixed(2)}</span>`;
                 if (n <= 30) return `<span class="rsi-pos">${n.toFixed(2)}</span>`;
                 return `<span class="rsi-neutral">${n.toFixed(2)}</span>`;
             };
             const colorCompareHtml = (val, cmp) => {
-                // For EMA/DMA: Green if CMP > indicator, Red if CMP < indicator, Grey if equal or unavailable
                 if (val===null || val===undefined || val==='') return '<span class="cell-muted">-</span>';
                 const n = Number(val); const c = Number(cmp);
                 if (isNaN(n)) return '<span class="cell-muted">-</span>';
                 if (isNaN(c)) return `<span class="percent-neutral">${n.toFixed(2)}</span>`;
-                if (c > n) return `<span class="percent-pos">${n.toFixed(2)}</span>`; // CMP > indicator -> green
-                if (c < n) return `<span class="percent-neg">${n.toFixed(2)}</span>`; // CMP < indicator -> red
+                if (c > n) return `<span class="percent-pos">${n.toFixed(2)}</span>`;
+                if (c < n) return `<span class="percent-neg">${n.toFixed(2)}</span>`;
                 return `<span class="percent-neutral">${n.toFixed(2)}</span>`;
             };
             const pct = (val, cmp) => {
-                // val = indicator, cmp = CMP
-                if (val==null || val==='' || cmp==null || cmp==='' ) return '<span class="cell-muted">-</span>';
+                if (val==null || val==='' || cmp==null || cmp==='') return '<span class="cell-muted">-</span>';
                 const n = Number(val), c = Number(cmp);
                 if (isNaN(n) || isNaN(c) || c===0) return '<span class="cell-muted">-</span>';
                 const d = ((n - c)/c)*100;
-                // Color GREEN when CMP > indicator (bullish), RED when CMP < indicator (bearish), GREY when equal
                 let cls = 'percent-neutral';
-                if (c > n) cls = 'percent-pos';
-                else if (c < n) cls = 'percent-neg';
+                if (c > n) cls = 'percent-pos'; else if (c < n) cls = 'percent-neg';
                 return `<span class="${cls}" data-pct="${d}">${d.toFixed(2)}%</span>`;
             };
             const reco = () => {
                 try {
-                    // Use the unified, timeframe-aware scorer
                     const sc = computeRecoScore(symbolData);
                     return scoreToLabelHtml(sc);
                 } catch (e) { return '<span class="reco-neutral">Neutral</span>'; }
@@ -1680,42 +1871,33 @@
             rsiKeys.forEach(k => tr.appendChild(td(colorRsiHtml(getCellVal(k)))));
             // Use numeric CMP when available (clean any currency/formatting). Pass numeric CMP into helpers
             const cmpVal = !isNaN(cmpNum) ? cmpNum : NaN;
-            // Render EMA columns dynamically
-            const emaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('ema_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
-            // Special rendering: EMA-9 and EMA-15 should share color based on their relation.
-            const parseNumForCell = (v) => { if (v === null || v === undefined || v === '') return NaN; const s = String(v).replace(/[^0-9.\-]/g,''); const n = parseFloat(s); return isNaN(n) ? NaN : n; };
-            const ema9Raw = getCellVal('ema_9'); const ema15Raw = getCellVal('ema_15');
-            const ema9Num = parseNumForCell(ema9Raw); const ema15Num = parseNumForCell(ema15Raw);
-            emaKeys.forEach(k => {
+            // Render only EMA-X (crossover) column
+            const crossoverKey = colIndexMap['ema_15_crossover'] !== undefined ? 'ema_15_crossover' : null;
+            if (crossoverKey) {
+                const formatted = formatEmaGapDisplay(getCellVal(crossoverKey));
+                const cellEl = td(formatted.html);
+                cellEl.classList.add('ema-x-cell');
+                cellEl.style.cursor = 'pointer';
+                if (formatted.value !== null) {
+                    cellEl.setAttribute('data-original', String(formatted.value));
+                    cellEl.setAttribute('data-pct', String(formatted.value));
+                }
+                // Prime popup data from initial symbolData if available
                 try {
-                    const val = getCellVal(k);
-                    if (k === 'ema_9' || k === 'ema_15') {
-                        // Determine color from ema9 vs ema15
-                        let cls = 'percent-neutral';
-                        if (!isNaN(ema9Num) && !isNaN(ema15Num)) {
-                            if (ema9Num > ema15Num) cls = 'percent-pos';
-                            else if (ema9Num < ema15Num) cls = 'percent-neg';
-                            else cls = 'percent-neutral';
-                        }
-                        // Content: show percent if toggle on, else numeric
-                        let content = '';
-                        if (showPctDiff) {
-                            if (val === null || val === undefined || val === '' || isNaN(parseNumForCell(val)) || isNaN(cmpVal) || cmpVal === 0) {
-                                content = '<span class="cell-muted">-</span>';
-                            } else {
-                                const n = parseNumForCell(val);
-                                const d = ((n - cmpVal) / cmpVal) * 100;
-                                content = `${d.toFixed(2)}%`;
-                            }
-                        } else {
-                            content = (val === null || val === undefined || val === '') ? '<span class="cell-muted">-</span>' : Number(parseNumForCell(val)).toFixed(2);
-                        }
-                        tr.appendChild(td(`<span class="${cls}">${content}</span>`));
-                    } else {
-                        tr.appendChild(td(showPctDiff ? pct(getCellVal(k), cmpVal) : colorCompareHtml(getCellVal(k), cmpVal)));
-                    }
-                } catch (e) { tr.appendChild(td('<span class="cell-muted">-</span>')); }
-            });
+                    const rawEma9 = getCellVal('ema_9');
+                    const rawEma15 = getCellVal('ema_15');
+                    const rawEma21 = getCellVal('ema_21');
+                    const toNum = (v) => { if (v===null||v===undefined||v==='') return NaN; const s=String(v).replace(/[^0-9.\-]/g,''); const n=parseFloat(s); return isNaN(n)?NaN:n; };
+                    const e9 = toNum(rawEma9);
+                    const longSel = (typeof window.longEmaPeriod !== 'undefined') ? window.longEmaPeriod : 15;
+                    const el = longSel === 21 ? toNum(rawEma21) : toNum(rawEma15);
+                    if (!isNaN(e9)) cellEl.setAttribute('data-ema9', e9.toFixed(2));
+                    if (!isNaN(el)) cellEl.setAttribute('data-emalong', el.toFixed(2));
+                    if (!isNaN(cmpVal)) cellEl.setAttribute('data-cmp', cmpVal.toFixed(2));
+                    cellEl.setAttribute('data-long', String(longSel));
+                } catch(e) { /* ignore */ }
+                tr.appendChild(cellEl);
+            }
             // Render DMA columns dynamically
             const dmaKeys = Object.keys(colIndexMap).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
             dmaKeys.forEach(k => tr.appendChild(td(showPctDiff ? pct(getCellVal(k), cmpVal) : colorCompareHtml(getCellVal(k), cmpVal))));
@@ -1756,7 +1938,7 @@
                 const has = (k) => symbolObj && symbolObj[k] !== undefined && symbolObj[k] !== null && symbolObj[k] !== '';
                 // Determine required keys dynamically from colIndexMap
                 const requiredRsi = Object.keys(colIndexMap).filter(k=>k.startsWith('rsi_'));
-                const requiredEma = Object.keys(colIndexMap).filter(k=>k.startsWith('ema_'));
+                const requiredEma = Object.keys(colIndexMap).filter(k=>k.startsWith('ema_') && k !== 'ema_15_crossover');
                 const requiredDma = Object.keys(colIndexMap).filter(k=>k.startsWith('dma_'));
                 const needsRsi = requiredRsi.some(k => !has(k));
                 const needsEma = requiredEma.some(k => !has(k));
@@ -1817,7 +1999,7 @@
             const toNum = (v) => {
                 if (v === null || v === undefined) return NaN;
                 if (typeof v === 'number') return v;
-                const s = String(v).replace(/[^0-9.\-]/g, '');
+                const s = String(v).replace('%','').replace(/[^0-9\.\-]/g, '');
                 const n = parseFloat(s);
                 return isNaN(n) ? NaN : n;
             };
@@ -1890,7 +2072,15 @@
                 if (visible && (useEma || useDma) && document.getElementById('togglePct')?.checked) {
                     const cols = tr.querySelectorAll('td');
                     // Determine EMA/DMA column indices from colIndexMap
-                    const emaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('ema_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
+                    const rawKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('ema_'));
+                    const emaKeys = rawKeys.filter(k => k !== 'ema_15_crossover').sort((a,b)=>{
+                        const aNum = parseInt(a.split('_')[1], 10);
+                        const bNum = parseInt(b.split('_')[1], 10);
+                        if (isNaN(aNum) && isNaN(bNum)) return a.localeCompare(b);
+                        if (isNaN(aNum)) return 1;
+                        if (isNaN(bNum)) return -1;
+                        return aNum - bNum;
+                    });
                     const dmaKeys = Object.keys(colIndexMap || {}).filter(k => k.startsWith('dma_')).sort((a,b)=>parseInt(a.split('_')[1]) - parseInt(b.split('_')[1]));
                     const checkKeys = [];
                     if (useEma) checkKeys.push(...emaKeys);
@@ -1998,6 +2188,92 @@
                 openPopups.forEach(p => { if (p.style.display !== 'none') p.style.display = 'none'; });
             } catch (e) {}
         });
+
+    // EMA-15/21 detail popup: show compact values when clicking on EMA-X cell
+        (function initEmaXPopup(){
+            let currentPopup = null;
+            function closePopup() {
+                if (currentPopup && currentPopup.parentNode) {
+                    try { currentPopup.parentNode.removeChild(currentPopup); } catch(e){}
+                }
+                currentPopup = null;
+            }
+            function fmtSigned(n, decimals=2, withPct=false) {
+                if (n === null || n === undefined || isNaN(n)) return '-';
+                const sign = n > 0 ? '+' : '';
+                return `${sign}${Number(n).toFixed(decimals)}${withPct ? '%' : ''}`;
+            }
+            function showPopupForCell(cell){
+                closePopup();
+                // Ensure cell is positioned for absolute popup
+                try { if (getComputedStyle(cell).position === 'static') { cell.style.position = 'relative'; } } catch(e){}
+                const ema9 = parseFloat(cell.getAttribute('data-ema9'));
+                const emalong = parseFloat(cell.getAttribute('data-emalong'));
+                const cmp = parseFloat(cell.getAttribute('data-cmp'));
+                const longP = parseInt(cell.getAttribute('data-long') || (window.longEmaPeriod || 15), 10);
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'ema-popup';
+                if (!isNaN(ema9)) {
+                    wrapper.innerHTML += `<span class="line">EMA-9: ${Number(ema9).toFixed(2)}</span>`;
+                } else {
+                    wrapper.innerHTML += `<span class="line muted">EMA-9: -</span>`;
+                }
+                if (!isNaN(emalong)) {
+                    wrapper.innerHTML += `<span class="line">EMA-${isNaN(longP)?'X':longP}: ${Number(emalong).toFixed(2)}</span>`;
+                } else {
+                    wrapper.innerHTML += `<span class="line muted">EMA-${isNaN(longP)?'X':longP}: -</span>`;
+                }
+                const xDiff = (!isNaN(ema9) && !isNaN(emalong)) ? (ema9 - emalong) : NaN;
+                const xPct = (!isNaN(ema9) && !isNaN(emalong) && Math.abs(emalong) > 1e-9) ? ((ema9 - emalong)/emalong)*100 : NaN;
+                wrapper.innerHTML += `<span class="line">Δ(EMA9 − EMA${isNaN(longP)?'X':longP}): ${fmtSigned(xPct,2,true)} (${fmtSigned(xDiff,2,false)})</span>`;
+                const cmpDiff = (!isNaN(ema9) && !isNaN(cmp)) ? (ema9 - cmp) : NaN;
+                const cmpPct = (!isNaN(ema9) && !isNaN(cmp) && Math.abs(cmp) > 1e-9) ? ((ema9 - cmp)/cmp)*100 : NaN;
+                wrapper.innerHTML += `<span class="line">Δ(EMA9 − CMP): ${fmtSigned(cmpPct,2,true)} (${fmtSigned(cmpDiff,2,false)})</span>`;
+                // Position below the cell, right-aligned
+                wrapper.style.top = 'calc(100% + 4px)';
+                wrapper.style.right = '0px';
+                cell.appendChild(wrapper);
+                currentPopup = wrapper;
+            }
+            // Delegate clicks on EMA-X cells
+            try {
+                const tbody = document.getElementById('symbolsTBody');
+                if (tbody) {
+                    tbody.addEventListener('click', async function(e){
+                        const td = e.target && e.target.closest ? e.target.closest('td') : null;
+                        if (td && td.classList && td.classList.contains('ema-x-cell')) {
+                            e.stopPropagation();
+                            // Ensure data is present and matches current long selection; if missing or stale, compute on-demand
+                            let ema9 = parseFloat(td.getAttribute('data-ema9'));
+                            let emalong = parseFloat(td.getAttribute('data-emalong'));
+                            let cmp = parseFloat(td.getAttribute('data-cmp'));
+                            const cellLong = parseInt(td.getAttribute('data-long') || '0', 10);
+                            const desiredLong = (typeof window.longEmaPeriod !== 'undefined') ? window.longEmaPeriod : 15;
+                            const needsRefresh = (isNaN(ema9) || isNaN(emalong) || isNaN(cmp) || (cellLong !== desiredLong));
+                            if (needsRefresh) {
+                                try {
+                                    const tr = td.closest('tr');
+                                    const rid = tr && tr.id ? tr.id : '';
+                                    const symbol = rid.startsWith('row-') ? rid.substring(4) : null;
+                                    const tf = document.getElementById('timeframeSelect')?.value || '15mins';
+                                    if (symbol) {
+                                        await updateEmaForSymbol(symbol, tf);
+                                    }
+                                } catch(e) { /* ignore */ }
+                            }
+                            showPopupForCell(td);
+                        } else {
+                            // Click elsewhere inside tbody closes the popup
+                            closePopup();
+                        }
+                    });
+                }
+            } catch(e) { /* ignore */ }
+            // Close on outside click or ESC
+            document.addEventListener('click', function(){ closePopup(); });
+            document.addEventListener('keydown', function(e){ if (e && (e.key === 'Escape' || e.key === 'Esc')) closePopup(); });
+        })();
 
         // Update scanner chip status (display time inside chip; running shows blink)
         function updateScannerChip(symbol, scanner, status, time = null, error = null) {
@@ -2348,10 +2624,10 @@
                 const d = data.data;
                 // Update columns we know (new layout includes rsi_5, ema_21, dma_100, dma_200)
                 const map = {
-                    'rsi': ['rsi_5','rsi_15','rsi_30'],
-                    'ema': ['ema_9','ema_15','ema_21'],
-                    'dma': ['dma_10','dma_20','dma_50','dma_100','dma_200']
-                };
+                        'rsi': ['rsi_5','rsi_15','rsi_30'],
+                        'ema': ['ema_9','ema_15','ema_15_crossover','ema_21'],
+                        'dma': ['dma_10','dma_20','dma_50','dma_100','dma_200']
+                    };
                 const fmt = (v) => (v===null||v===undefined||v==='')?'-':Number(v).toFixed(2);
                 const cells = row.querySelectorAll('td');
                 // Use dynamic colIndexMap built by header builder
@@ -2380,13 +2656,26 @@
                     const alternates = [key];
                     if (key === 'rsi_5') alternates.push('rsi_15','rsi_30');
                     if (key === 'ema_21') alternates.push('ema_65');
+                    if (key === 'ema_15_crossover') alternates.push('ema15_crossover', 'ema15Xover');
                     if (key === 'dma_100') alternates.push('dma_50');
                     if (key === 'dma_200') alternates.push('ema_200','dma_50');
                     // find first available data key in payload
                     let dataKey = alternates.find(k => (k in d && d[k] !== undefined && d[k] !== null));
                     if (!dataKey) dataKey = (key in d) ? key : null;
                     if (dataKey && colIndex && colIndex[key] !== undefined) {
-                        if (showPctDiff && (key.startsWith('ema_') || key.startsWith('dma_'))) {
+                        if (key === 'ema_15_crossover') {
+                            const raw = d[dataKey] ?? d[key];
+                            const formattedGap = formatEmaGapDisplay(raw);
+                            const cell = cells[colIndex[key]];
+                            cell.innerHTML = formattedGap.html;
+                            if (formattedGap.value !== null) {
+                                cell.setAttribute('data-original', String(formattedGap.value));
+                                cell.setAttribute('data-pct', String(formattedGap.value));
+                            } else {
+                                cell.removeAttribute('data-original');
+                                cell.removeAttribute('data-pct');
+                            }
+                        } else if (showPctDiff && (key.startsWith('ema_') || key.startsWith('dma_'))) {
                             // Prefer numeric CMP stored on the cell via data-cmp
                             const cmpAttr = cells[1]?.getAttribute && cells[1].getAttribute('data-cmp');
                             const cmpVal = (cmpAttr !== null && cmpAttr !== undefined) ? parseFloat(cmpAttr) : parseFloat(cells[1]?.innerText?.replace(/[^0-9.\-]/g,'') || 'NaN');

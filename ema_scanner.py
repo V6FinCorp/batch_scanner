@@ -385,6 +385,26 @@ def run_ema_scanner():
         for ema_col, ema_series in ema_results.items():
             df[ema_col] = ema_series
 
+        # Detect EMA crossovers between EMA(9) and EMA(15) without altering existing calculations
+        crossover_column = 'ema_15_crossover'
+        if 'ema_15' in df.columns:
+            if 'ema_9' in df.columns:
+                ema9 = df['ema_9']
+                ema15 = df['ema_15']
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    pct_gap = ((ema9 - ema15) / ema15) * 100.0
+                if isinstance(pct_gap, pd.Series):
+                    pct_gap = pct_gap.mask(ema15.abs() < 1e-6)
+                    pct_gap = pct_gap.replace([np.inf, -np.inf], np.nan)
+                    pct_gap = pct_gap.round(2)
+                df[crossover_column] = pct_gap
+            else:
+                df[crossover_column] = np.nan
+
+            # Keep crossover information adjacent to EMA(15) for readability
+            ema15_index = df.columns.get_loc('ema_15')
+            df.insert(ema15_index + 1, crossover_column, df.pop(crossover_column))
+
         # Filter data for the specified number of days
         if not df.empty:
             latest_date = df['timestamp'].max().date()
@@ -414,7 +434,11 @@ def run_ema_scanner():
         print(f"{'='*100}")
 
         # Create headers
-        headers = ['Time', 'Symbol', 'CMP'] + [f'EMA{period}' for period in ema_periods]
+        headers = ['Time', 'Symbol', 'CMP']
+        for period in ema_periods:
+            headers.append(f'EMA{period}')
+            if period == 15:
+                headers.append('EMA15_Crossover')
 
         # Calculate column widths
         col_widths = {}
@@ -442,6 +466,15 @@ def run_ema_scanner():
                     else:
                         try:
                             value = f"{float(close_val):.2f}"
+                        except (ValueError, TypeError):
+                            value = 'N/A'
+                elif header == 'EMA15_Crossover':
+                    val = row.get('ema_15_crossover', np.nan)
+                    if pd.isna(val):
+                        value = 'N/A'
+                    else:
+                        try:
+                            value = f"{float(val):.2f}%"
                         except (ValueError, TypeError):
                             value = 'N/A'
                 else:
@@ -480,6 +513,15 @@ def run_ema_scanner():
                     else:
                         try:
                             value = f"{float(close_val):.2f}"
+                        except (ValueError, TypeError):
+                            value = 'N/A'
+                elif header == 'EMA15_Crossover':
+                    val = row.get('ema_15_crossover', np.nan)
+                    if pd.isna(val):
+                        value = 'N/A'
+                    else:
+                        try:
+                            value = f"{float(val):.2f}%"
                         except (ValueError, TypeError):
                             value = 'N/A'
                 else:

@@ -328,6 +328,11 @@ def get_config(config_type):
         print(f"Error loading config {config_type}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/favicon.ico')
+def favicon():
+    """Silence default browser favicon requests to avoid 404 noise."""
+    return ('', 204)
+
 @app.route('/api/symbol-table')
 def get_symbol_table():
     """Get symbol table for progressive loading using ProgressiveScanner."""
