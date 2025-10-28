@@ -624,7 +624,7 @@
         // Wire timeframe selector to refresh mini-candles (debounced)
         try {
             const topTf = document.getElementById('timeframeSelect');
-            if (topTf) topTf.addEventListener('change', debounce(() => { refreshAllMiniSparks(); computeHeaderOffset(); updateAllEmaForTimeframe(); }, 400));
+            if (topTf) topTf.addEventListener('change', debounce(() => { refreshAllMiniSparks(); computeHeaderOffset(); updateAllEmaForTimeframe({ skipDma: false, silent: false }); }, 400));
         } catch (e) { /* ignore */ }
 
         // Long EMA switcher (radio) wiring
@@ -648,7 +648,7 @@
                         if (thCross) thCross.textContent = `EMA-${v}-X`;
                     } catch(e){ /* ignore */ }
                     // Recompute EMA values for all rows for current timeframe
-                    try { updateAllEmaForTimeframe(); } catch(e){ /* ignore */ }
+                    try { updateAllEmaForTimeframe({ skipDma: true, silent: true }); } catch(e){ /* ignore */ }
                 };
                 if (r15) r15.addEventListener('change', (e)=>{ if (e.target && e.target.checked) apply('15'); });
                 if (r21) r21.addEventListener('change', (e)=>{ if (e.target && e.target.checked) apply('21'); });
@@ -700,9 +700,11 @@
                 
                 renderSymbolsTable();
                 updateSymbolStats();
+                // Draw initial Trend mini-candles for all symbols
+                try { await refreshAllMiniSparks(); } catch(e) { /* ignore */ }
                 updateStatusBar('Symbols loaded successfully');
                 // Compute EMA values for current timeframe once on initial load to ensure EMA popup has data
-                try { await updateAllEmaForTimeframe(); } catch(e) { /* ignore */ }
+                try { await updateAllEmaForTimeframe({ skipDma: false, silent: true }); } catch(e) { /* ignore */ }
                 
             } catch (error) {
                 console.error('Failed to load symbols:', error);
@@ -878,16 +880,28 @@
                 const q = `?timeframe=${encodeURIComponent(tf)}`;
                 let payload = null;
 
-                // Prefer OHLC-only endpoint which returns resampled OHLC (does not recompute indicators)
-                try {
-                    const ohlcRes = await fetch(`/api/chart-data/ohlc/${symbol}${q}`, { cache: 'no-store' }).catch(() => null);
-                    if (ohlcRes && ohlcRes.ok) {
-                        const p = await ohlcRes.json().catch(() => null);
-                        if (p && p.chartData && Array.isArray(p.chartData.datasets) && p.chartData.datasets.length > 0) {
-                            payload = p;
+                // Small helper to fetch OHLC payload; returns null on failure
+                const fetchOhlc = async () => {
+                    try {
+                        const ohlcRes = await fetch(`/api/chart-data/ohlc/${symbol}${q}`, { cache: 'no-store' }).catch(() => null);
+                        if (ohlcRes && ohlcRes.ok) {
+                            const p = await ohlcRes.json().catch(() => null);
+                            if (p && p.chartData && Array.isArray(p.chartData.datasets) && p.chartData.datasets.length > 0) {
+                                return p;
+                            }
                         }
+                    } catch (e) { /* ignore */ }
+                    return null;
+                };
+
+                // Prefer OHLC-only endpoint; retry a couple times in case of transient cache/IO hiccups
+                for (let attempt = 0; attempt < 3 && !payload; attempt++) {
+                    payload = await fetchOhlc();
+                    if (!payload && attempt < 2) {
+                        // simple backoff
+                        await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
                     }
-                } catch (e) { /* ignore */ }
+                }
 
                 // Do NOT fallback to indicator endpoints here. For mini-candles we only need OHLC
                 // If OHLC isn't available, draw placeholder — avoid triggering EMA/DMA/RSI computations.
@@ -913,8 +927,8 @@
                     return false;
                 }
 
-                // Find OHLC dataset
-                const ohlcDs = payload.chartData.datasets.find(d => d.label && d.label.toUpperCase() === 'OHLC');
+                // Find OHLC dataset (allow partial matches like 'OHLC(5m)')
+                const ohlcDs = payload.chartData.datasets.find(d => d.label && /ohlc/i.test(d.label));
                 let ohlcArray = null;
                 if (ohlcDs && Array.isArray(ohlcDs.data) && ohlcDs.data.length > 0) {
                     if (Array.isArray(ohlcDs.data[0])) ohlcArray = ohlcDs.data.slice();
@@ -1024,10 +1038,10 @@
             return out;
         }
 
-        // Update EMA cells for a single symbol by fetching OHLC resampled to timeframe and computing ema9/ema15
+    // Update EMA cells for a single symbol by fetching OHLC resampled to timeframe and computing ema9 vs selected long EMA
         async function updateEmaForSymbol(symbol, timeframe) {
             try {
-                if (!colIndexMap || !colIndexMap['ema_9'] || !colIndexMap['ema_15']) return false;
+        if (!colIndexMap || colIndexMap['ema_15_crossover'] === undefined) return false;
                 const res = await fetch(`/api/chart-data/ohlc/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}`, { cache: 'no-store' }).catch(() => null);
                 if (!res || !res.ok) return false;
                 const payload = await res.json().catch(() => null);
@@ -1137,18 +1151,28 @@
             return Promise.all(results);
         }
 
-        async function updateAllEmaForTimeframe() {
+        async function updateAllEmaForTimeframe(options) {
             try {
+                const opts = options || {};
                 const tf = document.getElementById('timeframeSelect')?.value || '15mins';
                 const list = symbols.map(s => s.Symbol || s);
                 if (!list || list.length === 0) return;
-                // Show small progress toast
-                showModalProgress(`Updating EMA(9/15) for timeframe ${tf}...`);
+                // Show small progress toast (unless silent)
+                if (!opts.silent) {
+                    const longLbl = (typeof window.longEmaPeriod !== 'undefined' && window.longEmaPeriod === 21) ? '9/21' : '9/15';
+                    showModalProgress(`Updating EMA(${longLbl}) for timeframe ${tf}...`);
+                }
                 await runWithConcurrency(list, async (sym) => { await updateEmaForSymbol(sym, tf); }, 6);
-                clearModalProgress();
-                toastr.success('EMA(9/15) updated to selected timeframe', 'EMA Updated');
-                // After EMA values updated, attempt to populate missing DMA values for visible rows
-                try { await ensureDmaForVisibleRows(); } catch(e) { /* ignore */ }
+                if (!opts.silent) {
+                    clearModalProgress();
+                    toastr.success('EMA updated for selected timeframe', 'EMA Updated');
+                } else {
+                    try { clearModalProgress(); } catch(e) {}
+                }
+                // After EMA values updated, attempt to populate missing DMA values only when not skipping
+                if (!opts || !opts.skipDma) {
+                    try { await ensureDmaForVisibleRows(); } catch(e) { /* ignore */ }
+                }
                 try { updateAllRecoLabels(); } catch(e) { /* ignore */ }
             } catch (e) {
                 try { clearModalProgress(); } catch(e){}
@@ -1976,10 +2000,8 @@
 
                 // Register mini canvas for lazy loading only if some data (OHLC/RSI/EMA/DMA) is available
                 try {
-                    const hasAnyAvailable = ['OHLC_Available','RSI_Available','EMA_Available','DMA_Available'].some(k => symbolObj && symbolObj[k]);
-                    if (hasAnyAvailable) {
-                        try { observeMiniCanvas(s); } catch(e) { /* ignore */ }
-                    }
+                    // Always attempt to load mini spark for the symbol; the loader will draw a placeholder if no data
+                    observeMiniCanvas(s);
                 } catch(e) { /* ignore */ }
             })(symbolData, s);
 
@@ -3364,12 +3386,22 @@
                         const overlayColors = ['rgb(59,130,246)','rgb(16,185,129)','rgb(249,115,22)','rgb(14,165,233)','rgb(250,204,21)'];
                         indicatorSets.forEach((d, i) => priceDatasets.push({ label: d.label, data: d.data, type: 'line', borderColor: overlayColors[i % overlayColors.length], backgroundColor: 'rgba(0,0,0,0)', fill: false, pointRadius: 0, tension: 0.12 }));
 
-                        // If OHLC candlesticks are present and plugin is used, convert numeric overlay datasets to {x,y}
-                        // points so they align with the candlestick objects and are rendered reliably.
+                        // Normalize line overlays for Chart.js parsing rules
                         if (ohlc && candlestickAvailable) {
+                            // With candlesticks, line datasets should be {x,y} objects with parsing disabled
                             priceDatasets.forEach(ds => {
-                                if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0 && typeof ds.data[0] !== 'object') {
-                                    ds.data = ds.data.map((v, i) => ({ x: i, y: (v === null || v === undefined) ? null : Number(v) }));
+                                if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0) {
+                                    if (typeof ds.data[0] !== 'object') {
+                                        ds.data = ds.data.map((v, i) => ({ x: i, y: (v === null || v === undefined) ? null : Number(v) }));
+                                    } else {
+                                        ds.data = ds.data.map((pt, i) => {
+                                            if (pt === null || pt === undefined) return { x: i, y: null };
+                                            const x = (pt && pt.x !== undefined) ? pt.x : i;
+                                            const yRaw = (pt && (pt.y ?? pt.c ?? pt.value ?? pt.close ?? (Array.isArray(pt) ? pt[3] : undefined)));
+                                            const y = (yRaw === null || yRaw === undefined) ? null : Number(yRaw);
+                                            return { x, y };
+                                        });
+                                    }
                                     ds.parsing = false;
                                     ds.order = 1; // draw above candlesticks
                                     ds.borderWidth = ds.borderWidth || 2;
@@ -3377,8 +3409,19 @@
                                 }
                             });
                         } else {
-                            // Ensure overlays are visible for line-only top chart
-                            priceDatasets.forEach(ds => { if (ds && ds.type === 'line') { ds.order = ds.order || 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true; } });
+                            // Without candlesticks, prefer simple numeric arrays (category x-axis uses index)
+                            priceDatasets.forEach(ds => {
+                                if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0) {
+                                    if (typeof ds.data[0] === 'object') {
+                                        ds.data = ds.data.map(pt => {
+                                            if (pt === null || pt === undefined) return null;
+                                            const yRaw = (pt && (pt.y ?? pt.c ?? pt.value ?? pt.close ?? (Array.isArray(pt) ? pt[3] : undefined)));
+                                            return (yRaw === null || yRaw === undefined) ? null : Number(yRaw);
+                                        });
+                                    }
+                                    ds.order = ds.order || 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true;
+                                }
+                            });
                         }
 
                         // Build top chart (candlestick if available; otherwise line). Force category x-axis to avoid date adapter usage.
@@ -3703,17 +3746,40 @@
                 const overlayColors = ['rgb(59,130,246)','rgb(16,185,129)','rgb(249,115,22)','rgb(14,165,233)','rgb(250,204,21)'];
                 indicatorSets.forEach((d,i) => priceDatasets.push({ label: d.label, data: d.data, type: 'line', borderColor: overlayColors[i%overlayColors.length], backgroundColor: 'rgba(0,0,0,0)', fill: false, pointRadius: 0, tension: 0.12 }));
 
-                // Convert line overlays to {x,y} when OHLC present
-                if (ohlc && candlestickAvailable) {
-                    priceDatasets.forEach(ds => {
-                        if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0 && typeof ds.data[0] !== 'object') {
-                            ds.data = ds.data.map((v,i) => ({ x: i, y: (v===null||v===undefined)?null:Number(v) }));
-                            ds.parsing = false; ds.order = 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true;
+                        // Normalize line overlays for Chart.js parsing rules
+                        if (ohlc && candlestickAvailable) {
+                            // With candlesticks, line datasets should be {x,y} objects with parsing disabled
+                            priceDatasets.forEach(ds => {
+                                if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0) {
+                                    if (typeof ds.data[0] !== 'object') {
+                                        ds.data = ds.data.map((v,i) => ({ x: i, y: (v===null||v===undefined)?null:Number(v) }));
+                                    } else {
+                                        ds.data = ds.data.map((pt,i) => {
+                                            if (pt === null || pt === undefined) return { x: i, y: null };
+                                            const x = (pt && pt.x !== undefined) ? pt.x : i;
+                                            const yRaw = (pt && (pt.y ?? pt.c ?? pt.value ?? pt.close ?? (Array.isArray(pt) ? pt[3] : undefined)));
+                                            const y = (yRaw===null||yRaw===undefined) ? null : Number(yRaw);
+                                            return { x, y };
+                                        });
+                                    }
+                                    ds.parsing = false; ds.order = 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true;
+                                }
+                            });
+                        } else {
+                            // Without candlesticks, prefer simple numeric arrays (category x-axis uses index)
+                            priceDatasets.forEach(ds => {
+                                if (ds && ds.type === 'line' && Array.isArray(ds.data) && ds.data.length > 0) {
+                                    if (typeof ds.data[0] === 'object') {
+                                        ds.data = ds.data.map(pt => {
+                                            if (pt === null || pt === undefined) return null;
+                                            const yRaw = (pt && (pt.y ?? pt.c ?? pt.value ?? pt.close ?? (Array.isArray(pt) ? pt[3] : undefined)));
+                                            return (yRaw===null||yRaw===undefined) ? null : Number(yRaw);
+                                        });
+                                    }
+                                    ds.order = ds.order || 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true;
+                                }
+                            });
                         }
-                    });
-                } else {
-                    priceDatasets.forEach(ds => { if (ds && ds.type === 'line') { ds.order = ds.order || 1; ds.borderWidth = ds.borderWidth || 2; ds.spanGaps = true; } });
-                }
 
                 // Build top chart (price)
                 try {
