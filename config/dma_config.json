@@ -1,7 +1,5 @@
 {
-    "symbols": [
-        "GRASIM"
-    ],
+    "symbols": [],
     "dma_periods": [
         10,
         20,
@@ -9,8 +7,8 @@
         100,
         200
     ],
-    "base_timeframe": "15mins",
-    "days_to_list": 4,
-    "days_fallback_threshold": 400,
+    "base_timeframe": "days",
+    "days_to_list": 250,
+    "days_fallback_threshold": 730,
     "displacement": 1
 }

@@ -91,6 +91,7 @@ def fetch_timeframe_data_direct(symbol, timeframe, days_back=300):
         '2hours': ('minutes', '120'),
         '4hours': ('minutes', '240'),
         'daily': ('days', '1'),
+        'days': ('days', '1'),
         'weekly': ('days', '7'),
         'monthly': ('days', '30'),
         'yearly': ('days', '365')
@@ -132,7 +133,13 @@ def fetch_timeframe_data_direct(symbol, timeframe, days_back=300):
     else:
         url = f"https://api.upstox.com/v3/historical-candle/{safe_key}/minutes/{interval}/{end_str}/{start_str}"
 
+    # Use authentication if available
+    token = os.environ.get('UPSTOX_ACCESS_TOKEN', '')
     headers = {'Accept': 'application/json'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    else:
+        print("No UPSTOX_ACCESS_TOKEN found in environment variables - direct fetch may fail")
 
     try:
         response = requests.get(url, headers=headers, timeout=30)
@@ -157,7 +164,7 @@ def fetch_timeframe_data_direct(symbol, timeframe, days_back=300):
 
             df = pd.DataFrame(rows)
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-            df = df.sort_values('timestamp')
+            df = df.sort_values('timestamp').reset_index(drop=True)
 
             return df
         else:
@@ -170,6 +177,11 @@ def fetch_timeframe_data_direct(symbol, timeframe, days_back=300):
 
 def fetch_timeframe_data(symbol, timeframe, days_back=300):
     """Fetch data for specific timeframe using data_loader.py"""
+    # For daily timeframe, use direct fetch as data_loader is specialized for 5-minute data
+    if timeframe == 'daily':
+        print(f"Using direct API fetch for daily data ({days_back} days)")
+        return fetch_timeframe_data_direct(symbol, timeframe, days_back)
+
     try:
         # Import data_loader functionality
         sys.path.append(os.path.join(os.path.dirname(__file__), 'data_loader'))
@@ -335,6 +347,18 @@ def run_rsi_scanner():
             print("Centralized symbols file not found, using default symbol")
     else:
         symbols = config['symbols']
+    
+    # Fallback to centralized symbols if list is empty
+    if not symbols:
+        try:
+            symbols_config_path = os.path.join(os.path.dirname(__file__), 'config', 'symbols.config.json')
+            with open(symbols_config_path, 'r') as f:
+                symbols_data = json.load(f)
+            symbols = symbols_data.get('symbols', ["ITC"])
+            print(f"Using fallback centralized symbols: {len(symbols)} symbols")
+        except FileNotFoundError:
+            symbols = ["ITC"]
+            print("Centralized symbols file not found, using default symbol")
     # Use RSI periods strictly from config
     rsi_periods = config['rsi_periods']
     base_timeframe = config.get('base_timeframe', '15mins')

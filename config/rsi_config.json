@@ -1,17 +1,15 @@
 {
-    "symbols": [
-        "APOLLOHOSP"
-    ],
+    "symbols": [],
     "rsi_periods": [
         5,
         15,
         30,
         60
     ],
-    "days_fallback_threshold": 200,
+    "days_fallback_threshold": 730,
     "rsi_overbought": 70,
     "rsi_oversold": 30,
-    "base_timeframe": "15mins",
-    "default_timeframe": "15mins",
-    "days_to_list": 4
+    "base_timeframe": "daily",
+    "default_timeframe": "daily",
+    "days_to_list": 250
 }

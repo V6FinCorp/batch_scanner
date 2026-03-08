@@ -45,14 +45,14 @@ A comprehensive web dashboard for running and visualizing technical analysis sca
 
 3. **Start the Dashboard Server:**
    ```bash
-   python dashboard_server.py
+   python app.py
    ```
 
 ## 🚂 Deploying to Railway.app
 
 1. **Prepare for Deployment:**
    - Ensure you have a valid `requirements.txt` file with all dependencies
-   - Verify that the `Procfile` contains the correct startup command (`web: python dashboard_server.py`)
+   - Verify that the `Procfile` contains the correct startup command (`web: gunicorn app:app`)
    - Check that `runtime.txt` specifies the correct Python version
 
 2. **Deploy to Railway.app:**
@@ -81,7 +81,7 @@ A comprehensive web dashboard for running and visualizing technical analysis sca
 ```
 scanners/
 ├── dashboard.html              # Main dashboard HTML interface
-├── dashboard_server.py        # Flask server with API endpoints
+├── app.py                     # Flask server with API endpoints
 ├── requirements.txt            # Python dependencies
 ├── railway.json               # Railway.app deployment config
 ├── Procfile                    # Railway deployment configuration
@@ -265,7 +265,7 @@ For production deployment:
    export PORT=5000
 
    # Start server
-   gunicorn dashboard_server:app
+   gunicorn app:app
    ```
 
 2. **Docker:**
@@ -274,7 +274,7 @@ For production deployment:
    WORKDIR /app
    COPY scanners/ .
    RUN pip install -r requirements.txt
-   CMD ["python", "dashboard_server.py"]
+   CMD ["python", "app.py"]
    ```
 
 3. **Railway.app (Recommended):**

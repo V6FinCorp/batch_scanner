@@ -93,7 +93,7 @@ def _ensure_utf8_template(template_filename: str) -> None:
 
 
 # Configure logging to file for diagnostics and /api/logs endpoint
-logger = logging.getLogger('dashboard_server')
+logger = logging.getLogger('app')
 logger.setLevel(logging.INFO)
 try:
     log_path = os.path.join(os.path.dirname(__file__), 'dashboard.log')
